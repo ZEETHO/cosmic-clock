@@ -3,153 +3,189 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>COSMIC CLOCK</title>
+<title>COSMIC CLOCK v2</title>
 <style>
-  :root{
-    --bg:#05070f;
-    --ink:#b8c4e0;
-    --mute:#3d4a6b;
-    --glow:#7b9fe0;
-    --panel:#0a0f1f;
-  }
+  :root{--bg:#05070f;--ink:#b8c4e0;--mute:#3d4a6b;--glow:#7b9fe0;--panel:#0a0f1f}
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100vw;height:100vh;background:var(--bg);color:var(--ink);
-    font-family:'SF Mono','Menlo',monospace;overflow:hidden;place-items:center}
-  body{display:grid}
-  #stage{
-    position:relative;width:min(96vw,96vh);height:min(96vw,96vh);
-    max-width:min(96vw,96vh);max-height:min(96vw,96vh);
+    font-family:'SF Mono','Menlo',monospace;overflow:hidden}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+  canvas:active{cursor:grabbing}
+  #seed{
+    position:fixed;top:8px;left:10px;font-size:10px;letter-spacing:.3em;
+    color:var(--mute);text-transform:uppercase;
+    transition:color 0.4s;
   }
-  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-  #info{
-    position:fixed;bottom:0;left:0;right:0;
-    background:linear-gradient(transparent,rgba(5,7,15,.95));
-    padding:6px 14px;font-size:11px;color:var(--mute);
-    display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 18px;
-    border-top:1px solid rgba(123,159,224,.12);
-    pointer-events:none;
-  }
-  #info .val{color:var(--ink);margin-right:6px}
-  #info .sep{color:var(--mute);opacity:.5}
   .kbd{
     position:fixed;top:8px;right:10px;font-size:10px;color:var(--mute);
     background:var(--panel);border:1px solid rgba(123,159,224,.18);
     padding:3px 8px;border-radius:4px;
   }
-  .title{
-    position:fixed;top:8px;left:10px;font-size:10px;letter-spacing:.35em;
-    color:var(--mute);text-transform:uppercase;
+  #info{
+    position:fixed;bottom:0;left:0;right:0;
+    background:linear-gradient(transparent,rgba(5,7,15,.95));
+    padding:6px 14px;font-size:11px;color:var(--mute);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 18px;
+    border-top:1px solid rgba(123,159,224,.12);pointer-events:none;
   }
-  /* ---- Rings configuration ---- */
-  /* R0  UTC + SI seconds            R~30%
-     R1  Celtic wheel + Hebrew        R~38%
-     R2  Chinese cycle + Islamic      R~46%
-     R3  Zodiac + plan. positions     R~54%
-     R4  Lunar mansion + phase        R~62%
-     R5  Planetary hour + I Ching     R~70%
-     R6  Sephiroth glow               R~78%
-     R7  Sacred geometry + sweep sec  R~86%
-     R8  Outer tick marks             R~94%
-  */
+  #info .val{color:var(--ink);margin-right:6px}
+  #info .sep{color:var(--mute);opacity:.5}
+  #help{
+    position:fixed;bottom:0;left:0;right:0;
+    background:var(--panel);border-top:1px solid rgba(123,159,224,.18);
+    padding:4px 14px;font-size:10px;color:var(--mute);
+    gap:6px 18px;pointer-events:none;
+    display:none;
+  }
 </style>
 </head>
 <body>
-<div class="title">COSMIC CLOCK</div>
+<div id="seed">DAILY SEED · ———</div>
 <canvas id="C"></canvas>
-<div class="kbd">H toggle ring labels · F fullscreen · 1-9 focus ring</div>
+<div class="kbd" id="kbd">H labels · F full · ` drag · ⇧ wheel zoom · R reset · ? help</div>
 <div id="info"></div>
+<div id="help"></div>
 
-<!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.9/astronomy.min.js"></script>
-
 <script>
 /* =========================================================
-   COSMIC CLOCK — rings 00-08, 9 esoteric layers
-   Real ephermeris via AstronomyEngine (skyfield fallback)
-   All other cycles computed in-engine
+   COSMIC CLOCK v2 — 10 esoteric rings + camera + daily seed + pp
    ========================================================= */
 
 const canvas = document.getElementById('C');
 const ctx = canvas.getContext('2d');
-let W,H,cx,cy,Rmax;
+let W,H,dpr,cx,cy;
 let showLabels = true;
 let focusRing = -1;
 let lastSec = -1;
-let sweepAngle = 0;
+
+// Camera
+let camX=0, camY=0, camZoom=1;
+let drag=null;
+
+// Daily seed
+let dailySeed = null;
 
 const DEG = Math.PI/180;
 const TAU = Math.PI*2;
 
+/* =========================================================
+   RESIZE
+   ========================================================= */
 function resize(){
-  const dpr = window.devicePixelRatio||1;
+  dpr = window.devicePixelRatio || 1;
   W = canvas.clientWidth; H = canvas.clientHeight;
   canvas.width = W*dpr; canvas.height = H*dpr;
-  ctx.setTransform(dpr,0,0,dpr,0,0);
   cx = W/2; cy = H/2;
-  Rmax = Math.min(cx,cy)*0.94;
 }
-window.addEventListener('resize',resize);
+window.addEventListener('resize', resize);
 
-/* ---- timezone helper ---- */
-function tzOffset(date, tz){
-  const utc = new Date(date.toLocaleString('en-US',{timeZone:'UTC'}));
-  const tzd = new Date(date.toLocaleString('en-US',{timeZone:tz}));
-  return (tzd-utc)/6e4;
+/* =========================================================
+   DAILY SEED — date-anchored deterministic hash
+   Derives from: date | iching | planetary ruler | nakshatra | sephi
+   ========================================================= */
+function makeDailySeed(now, R){
+  const d = now.toISOString().slice(0,10);
+  const src = d + '|' + R.R5.iching + '|' + R.R5.ruler + '|' + (R.R4.nak||'').slice(0,4) + '|' + (R.R6.seph||'');
+  let h = 0;
+  for(let i=0;i<src.length;i++) h = ((h << 5) - h + src.charCodeAt(i));
+  const seed = Math.abs(h|0).toString(16).toUpperCase().padStart(8,'0');
+  dailySeed = {date:d, seed, iching:R.R5.iching, ruler:R.R5.ruler, seph:R.R6.seph, nak:R.R4.nak};
+  try { localStorage.setItem('cosmicClockDaily', JSON.stringify(dailySeed)); } catch(e){}
+  try { history.replaceState(null,'', '#seed='+seed); } catch(e){}
+  return dailySeed;
+}
+function loadDailySeed(now, R){
+  const saved = (()=>{ try { return JSON.parse(localStorage.getItem('cosmicClockDaily')); } catch(e){ return null; } })();
+  if(saved && saved.date === now.toISOString().slice(0,10)) return saved;
+  return makeDailySeed(now, R);
 }
 
 /* =========================================================
-   RING DATA — computed once per SECOND
+   CAMERA EVENTS
    ========================================================= */
+canvas.addEventListener('mousedown', e=>{
+  drag = {x:e.clientX, y:e.clientY, cx:camX, cy:camY};
+  canvas.style.cursor='grabbing';
+});
+window.addEventListener('mousemove', e=>{
+  if(!drag) return;
+  camX = drag.cx + (e.clientX - drag.x);
+  camY = drag.cy + (e.clientY - drag.y);
+});
+window.addEventListener('mouseup', ()=>{ drag=null; canvas.style.cursor='grab'; });
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.06 : 0.06;
+  const newZoom = Math.max(0.35, Math.min(5, camZoom * (1 + delta)));
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left - cx;
+  const my = e.clientY - rect.top - cy;
+  const ratio = newZoom / camZoom;
+  camX = e.clientX - rect.left - cx - ratio * (e.clientX - rect.left - cx - camX);
+  camY = e.clientY - rect.top - cy - ratio * (e.clientY - rect.top - cy - camY);
+  camZoom = newZoom;
+}, {passive:false});
+
+/* =========================================================
+   WORLD → SCREEN
+   ========================================================= */
+function wsx(wx){ return wx * camZoom + cx + camX; }
+function wsy(wy){ return wy * camZoom + cy + camY; }
+function sf(px){ return Math.max(7, px / camZoom) + 'px "SF Mono",monospace'; }
+
+/* =========================================================
+   RING DATA — bottom of computeRings returns the canonical set
+   ========================================================= */
+const RING_R = [0.030,0.098,0.166,0.244,0.324,0.500,0.580,0.666,0.794,0.428];
+const RING_C = ['#7b9fe0','#7488b8','#88a09a','#88a0a0','#90a888','#7b9fe0','#8c5c3d','#6e7','#3d4a6b','#a89c6c'];
+
 function computeRings(now){
   const unix = now.getTime();
-  const ms  = now.getMilliseconds();
+  const ms = now.getMilliseconds();
   const sec = now.getSeconds() + ms/1000;
   const min = now.getMinutes() + sec/60;
-  const hr  = now.getHours()   + min/60;
+  const hr = now.getHours() + min/60;
   const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  // ---- AstronomyEngine observer: compute from local coords
-  // We'll use observer at 0°N,0°E (equator) for simplicity;
-  // for perceptions (rising/setting), observer matters.
+  /* ---- Observer ---- */
   let obs = null;
-  try {
-    obs = new AstronomyEngine.Observer(0, 0, 0);
-  } catch(e){ obs = null; }
-
-  // ---- J2000 epoch offsets ----
-  const J2000 = new Date('2000-01-01T12:00:00Z').getTime();
-  const daysSinceJ2000 = (unix - J2000)/864e5;
-
-  // ---- Planetary positions (heliocentric longitudes, geocentric approx with AE) ----
-  function aeLongitude(body, t){
+  function makeObserver(){
     try {
-      let r = null;
-      if(body==='Moon'){
-        const o = AstronomyEngine.Geocentric(day, AstroBody.Moon, obs);
-        r = o.eclipticLongitude;
-      } else {
-        const o = AstronomyEngine.Heliocentric(day, body, obs);
-        r = o.elon;
+      let o = null;
+      try { o = new AstronomyEngine.Observer(40.71, -74.01, 10); }
+      catch(e){
+        try { o = new AstronomyEngine.Observer({latitude:40.71, longitude:-74.01, elevation:10}); }
+        catch(e2){ o = null; }
       }
-      return (r*180/Math.PI + 360)%360;
-    } catch(e){ return ((t*360/365.25)%360); }
+      if(o) return o;
+      if(navigator && navigator.geolocation){
+        navigator.geolocation.getCurrentPosition(pos=>{
+          try {
+            const p = pos.coords;
+            obs = new AstronomyEngine.Observer(
+              Math.max(-90,Math.min(90,p.latitude)),
+              Math.max(-180,Math.min(180,p.longitude)),
+              Math.max(0,(p.altitude||0))
+            );
+          } catch(e){}
+        },()=>{},{timeout:8000});
+      }
+      return o;
+    } catch(e){ return null; }
   }
+  obs = makeObserver();
+
+  /* ---- AE helper ---- */
   let ae = null;
   try{ ae = AstronomyEngine; } catch(e){ ae = null; }
-
   function aePlanet(name){
     if(!ae) return 0;
-    let b = null;
-    if(name==='sun')   b=AstroBody.Sun;
-    if(name==='moon')  b=AstroBody.Moon;
-    if(name==='mercury') b=AstroBody.Mercury;
-    if(name==='venus')  b=AstroBody.Venus;
-    if(name==='mars')  b=AstroBody.Mars;
-    if(name==='jupiter') b=AstroBody.Jupiter;
-    if(name==='saturn') b=AstroBody.Saturn;
+    const map = {sun:'Sun',moon:'Moon',mercury:'Mercury',venus:'Venus',mars:'Mars',jupiter:'Jupiter',saturn:'Saturn'};
+    const b = map[name];
     if(!b) return 0;
     try{
-      const e = ae.Geocentric(day,b,obs);
+      const e = ae.Geocentric(day, ae[b], obs);
       return (e.eclipticLongitude*180/Math.PI+360)%360;
     }catch(e){ return 0; }
   }
@@ -161,161 +197,70 @@ function computeRings(now){
   const jupLng  = aePlanet('jupiter');
   const satLng  = aePlanet('saturn');
 
-  /* ---- R8: outer ticks ---- */
-  const R8 = 0.96;
-  const tickCount = 360;
-
-  /* ---- R0: UTC + SI seconds ---- */
-  const R0n = "UTC";
-  const R0v = now.toISOString().slice(0,19)+'Z';
-  const R0sec = sec;
-
-  /* ---- R0b: SI second sweep ---- */
-  // rendered as part of R8 sweep via sweepAngle
-
-  /* ---- R1: Celtic Tree Calendar + Hebrew ---- */
-  const CELTIC_TREES = [
-    "Birch","Rowan","Ash","Alder","Willow","Hawthorn","Oak","Holly","Hazel",
-    "Vine","Ivy","Reed","Elder"
-  ];
-  const CELTIC_NMONTH = 13;
-  const CELTIC_DAY_OFFSET = 3; // Nollaig = Dec 23 approx
-  const jan1 = Date.UTC(now.getFullYear(),0,1);
+  /* ---- R1: Celtic / Hebrew / Activity ---- */
+  const CELTIC = "Birch Rowan Ash Alder Willow Hawthorn Oak Holly Hazel Vine Ivy Reed Elder".split(' ');
   const yday = Math.floor((now - new Date(now.getFullYear(),0,1))/864e5);
-  const celticDayOfYear = (yday + CELTIC_DAY_OFFSET) % 365;
-  const celticMonth = Math.floor(celticDayOfYear / 28);
-  const celticDay   = (celticDayOfYear % 28) + 1;
-  const celticTree  = CELTIC_TREES[celticMonth % CELTIC_TREES.length];
-  const celticMonthName = "N"+(celticMonth+1);
-  const R1v = "Celtic " + celticMonthName + "·" + celticDay + " ("+celticTree+")";
-
-  // Hebrew — approximate
-  const HEBREW_EPOCH = -1373427; // Julian days
-  function hebrewDate(d){
-    const jd = Math.floor(d.getTime()/864e5 + 2440587.5);
-    const c = jd + 68569;
-    const n = Math.floor((4*c)/146097); c = c - Math.floor((146097*n+3)/4);
-    const year = Math.floor((4000*(c+1))/1461001); c = c - Math.floor((1461*year)/4)+31;
-    const month = Math.floor((80*c)/2447); c = Math.floor(c/2447);
-    const day = Math.floor(c - Math.floor(2447*month/80));
-    month = month + 12*c - 2937;
-    year = year - 4800 + Math.floor((month-14)/12);
-    return {y:year,m:month,d:c+1}; // actually returns Gregorian; placeholder
-  }
-  // Hebrew civil calendar: simpler mysql reference algorithm
-  function hebrewCivilDate(){
-    const jd = Math.floor(now.getTime()/864e5 + 2440587.5);
-    // Hebrew calendar from JD (simplified, known algorithm)
-    const a = jd + 32082;
-    const b = Math.floor((4*a+3)/146097); a = a - Math.floor(146097*b/4);
-    const c = Math.floor((4*a+3)/153); a = a - 153*c+2;
-    const year = Math.floor((5*a+2)/153);
-    // Convert to Hebrew year cycle
-    const hebCycle = Math.floor((jd - 347997) / 365.246822);
-    // Just use rough: today's Hebrew approx
-    const hd = new Date(now);
-    const hebYear = 5785 + Math.floor((jd-2460000)/365.2);
-    // months: Nisan=1..Iyyar..Tishri=7..Adar=13/12
-    const hebMonths=["Nisan","Iyyar","Sivan","Tammuz","Av","Elul","Tishri","Cheshvan","Kislev","Tevet","Shevat","Adar","Adar II"];
-    // Very rough: quicktable lookup offset from Sep 2024
-    // Instead: use window.hebrew to display only if available
-    return {y:hebYear,m:7,d:1}; // placeholder
-  }
-  // Use Intl Hebrew calendar if available (Safari+)
-  let R1hebrew = "";
+  const cdy = (yday+3) % 365;
+  const ci = Math.floor(cdy/28), cd = (cdy%28)+1;
+  const ct = CELTIC[ci % 13];
+  let rh = "", ha = 0.5, hf = 0;
   try {
-    const fmt = new Intl.DateTimeFormat('en-US',{calendar:'hebrew',year:'numeric',month:'long',day:'numeric'});
-    R1hebrew = fmt.format(now);
-  } catch(e){
-    R1hebrew = "Hebrew ≈ " + now.getFullYear();
-  }
+    const fmt = new Intl.DateTimeFormat('en-US',{
+      calendar:'hebrew',year:'numeric',month:'long',day:'numeric',
+      hour:'numeric',minute:'numeric',second:'numeric',hour12:false
+    });
+    rh = fmt.format(now).split(',')[0].trim();
+    const m = rh.match(/(\d+)(?:st|nd|rd|th)?\s*,\s*(\d{4})/);
+    if(m){
+      hf = Math.max(0, Math.min(1, (parseFloat(m[1])-1) / 29));
+      const lh = (now.getHours() + now.getMinutes()/60 + now.getSeconds()/3600) % 24;
+      ha = 0.5 + 0.5*Math.cos((lh - 12)/12*Math.PI);
+    }
+  } catch(e){ rh = "Hebrew ≈ " + now.getFullYear(); }
+  const R1v = "Celtic N"+(ci+1)+"·"+cd+" ("+ct+")";
 
-  /* ---- R2: Chinese sexagenary + Islamic ---- */
-  const CHINESE_STEMS = ["甲","乙","丙","丁","戊","己","庚","辛","壬","癸"];
-  const CHINESE_BRANCHES = ["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
-  const CHINESE_ANIMALS = ["Rat","Ox","Tiger","Rabbit","Dragon","Snake","Horse","Goat","Monkey","Rooster","Dog","Pig"];
-  // Chinese new year reference: 2024-02-10 (Dragon)
-  const CNY_2024 = Date.UTC(2024,1,10);
-  const cyc60 = Math.floor((unix - CNY_2024)/(864e5));
-  const sexagenary = ((cyc60 % 60)+60)%60;
-  const stem = CHINESE_STEMS[sexagenary%10];
-  const branch = CHINESE_BRANCHES[sexagenary%12];
-  const animal = CHINESE_ANIMALS[sexagenary%12];
-  const R2cn = stem+branch + " " + animal + "年";
-  // Islamic — approximate Jd conversion
-  const islEpoch = 1948439.5; // 16 Jul 622 Gregorian
-  const islJD = unix/864e5 + 2440587.5;
-  const islDays = Math.floor(islJD - islEpoch);
-  const islCycle = Math.floor(islDays / 354.36667);
-  const islYear = islCycle + 1;
-  const R2islamic = "ISL " + islYear;
+  /* ---- R2: Chinese / Islamic ---- */
+  const S = "甲乙丙丁戊己庚辛壬癸".split('');
+  const B = "子丑寅卯辰巳午未申酉戌亥".split('');
+  const A = "Rat Ox Tiger Rabbit Dragon Snake Horse Goat Monkey Rooster Dog Pig".split(' ');
+  const CNY = Date.UTC(2024,1,10);
+  const i60 = ((Math.floor((unix - CNY)/864e5) % 60) + 60) % 60;
+  const R2cn = S[i60%10] + B[i60%12] + " " + A[i60%12] + "年";
+  const R2islamic = "ISL " + (Math.floor((unix/864e5 + 2440587.5 - 1948439.5) / 354.36667) + 1);
 
-  /* ---- R3: Zodiac + planet positions ---- */
-  const ZODIAC = ["♈Ari","♉Tau","♊Gem","♋Can","♌Leo","♍Vir",
-                  "♎Lib","♏Sco","♐Sag","♑Cap","♒Aqu","♓Pis"];
-  function signAndDegree(lng){
-    const d = ((lng%360)+360)%360;
-    const idx = Math.floor(d/30)%12;
-    const deg = d - idx*30;
-    const mins = Math.floor((deg - Math.floor(deg))*60);
-    return {idx, deg:fpart(deg), mins, sign:ZODIAC[idx]};
-  }
-  function fpart(x){ return +(x.toFixed(2)); }
+  /* ---- R3: Zodiac ---- */
+  const ZS = "♈♉♊♋♌♍♎♏♐♑♒♓".split('');
+  const ZN = "Ari Tau Gem Can Leo Vir Lib Sco Sag Cap Aqu Pis".split('');
+  function sng(d){ return {i:Math.floor(d/30)%12, deg:+(d%30).toFixed(2), s:ZS[Math.floor(d/30)%12], n:ZN[Math.floor(d/30)%12]}; }
+  const RB = [
+    {n:"☉",lng:sunLng,c:'#ffd580'},{n:"☽",lng:moonLng,c:'#c8d8ff'},
+    {n:"☿",lng:mercLng,c:'#a8b8cc'},{n:"♀",lng:venLng,c:'#ffb8cc'},
+    {n:"♂",lng:marsLng,c:'#ff8080'},{n:"♃",lng:jupLng,c:'#ffe8a0'},
+    {n:"♄",lng:satLng,c:'#8899cc'}
+  ].map(b=>{ const c=sng(((b.lng%360)+360)%360); return {...b,...c}; });
 
-  const R3bodies = [
-    {name:"☉", lng:sunLng,  c:'#ffd580'},
-    {name:"☽", lng:moonLng, c:'#c8d8ff'},
-    {name:"☿", lng:mercLng, c:'#a8b8cc'},
-    {name:"♀", lng:venLng,  c:'#ffb8cc'},
-    {name:"♂", lng:marsLng, c:'#ff8080'},
-    {name:"♃", lng:jupLng,  c:'#ffe8a0'},
-    {name:"♄", lng:satLng,  c:'#8899cc'},
-  ].map(b=>{ const s=signAndDegree(b.lng); return {...b,...s}; });
+  /* ---- R4: Moon + Nakshatra ---- */
+  const msa = ((moonLng - sunLng)%360+360)%360;
+  const PN = ["New","Wax Crescent","First Quarter","Wax Gibbous","Full","Wan Gibbous","Last Quarter","Wan Crescent"];
+  const pi = Math.floor(msa/360*8+0.5)%8;
+  const illum = (1-Math.cos(msa*DEG*2))/2;
+  const NK = "Aśvinī Bharaṇī Kṛttikā Rohiṇī Mṛgaśīrā Ārdrā Punarvasu Puṣya Āśleṣā Maghā Pūrva Phalgunī Uttara Phalgunī Hasta Citrā Svāti Viśākhā Anūrādhā Jyeṣṭhā Mūla Pūrvāṣāḍhā Uttarāṣāḍhā Abhijit Śravaṇa Dhaniṣṭhā Shatabhishā Pūrva Bhādrapadā Uttara Bhādrapadā Revatī".split(' ');
+  const ni = Math.floor((((moonLng%360)+360)%360) / (360/27)) % 27;
 
-  /* ---- R4: Lunar phase + nakshatra ---- */
-  // Moon-sun angle = phase
-  const moonSunAngle = ((moonLng - sunLng)%360+360)%360;
-  const phaseNames = ["New","Wax Crescent","First Quarter","Wax Gibbous","Full","Wan Gibbous","Last Quarter","Wan Crescent"];
-  const phaseFrac = moonSunAngle/360;
-  const phaseIdx = Math.floor(phaseFrac*8+0.5)%8;
-  const phaseIllum = (1-Math.cos(moonSunAngle*DEG*2))/2;
-
-  // Nakshatra: 27 sectors of 360/27=13.333°
-  const NAKSHATRA = [
-    "Aśvinī","Bharaṇī","Kṛttikā","Rohiṇī","Mṛgaśīrā","Ārdrā",
-    "Punarvasu","Puṣya","Āśleṣā","Maghā","Pūrva Phalgunī","Uttara Phalgunī",
-    "Hasta","Citrā","Svāti","Viśākhā","Anūrādhā","Jyeṣṭhā",
-    "Mūla","Pūrvāṣāḍhā","Uttarāṣāḍhā","Abhijit","Śravaṇa","Dhaniṣṭhā",
-    "Shatabhishā","Pūrva Bhādrapadā","Uttara Bhādrapadā","Revatī"
-  ];
-  const nakIdx = Math.floor(((moonLng%360)+360)%360 / (360/27)) % 27;
-
-  /* ---- R5: Planetary hour + I Ching ---- */
-  // Sunrise/sunset via AE
-  let pRuler = "☉";
-  let pRulerIdx = 0;
+  /* ---- R5: Planetary hr + I Ching ---- */
+  let pr="☉", pi2=0;
   try {
     const ris = AstronomyEngine.SearchRiseSet(day, AstroBody.Sun, true, obs);
-    const set = ris.map(r=>r.time);
-    if(set.length){
-      const sunrise = set[0].date.getTime();
-      const sunset  = set.length>1 ? set[1].date.getTime() : sunrise+432e5;
-      let start = sunrise;
-      let dur = 3600*1e3;
-      if(hr*3600*1e3 >= sunset){
-        start = sunset; dur = (sunrise+864e5 - sunset)/12;
-      }
-      // 12 hours, chaldean order: Sun/Ven/Mer/Moon/Sat/Jup/Mars repeat
-      const CHALDEAN = ["☉","♀","☿","☽","♄","♃","♂"];
-      let pIdx = Math.floor(((hr*3600*1e3 - start)/dur)%7);
-      if(pIdx<0) pIdx=0;
-      pRuler = CHALDEAN[Math.floor(pIdx/1e3)%7];
-      pRulerIdx = Math.floor(pIdx/1e3)%7;
+    if(ris && ris.length){
+      const sr = ris[0].time.date.getTime();
+      const ss = ris.length>1 ? ris[1].time.date.getTime() : sr+432e5;
+      let start=sr, dur=Math.max(1,(ss-sr)/12);
+      if(hr*3600*1e3 >= ss){ start=ss; dur=Math.max(1,(sr+864e5-ss)/12); }
+      pi2 = Math.max(0, Math.floor((hr*3600*1e3 - start)/dur) % 7);
+      pr = ["☉","♀","☿","☽","♄","♃","♂"][pi2];
     }
   } catch(e){}
-
-  // I Ching: 64 hexagrams from seconds-of-day
-  const ICHING_NAMES = [
+  const IC = [
     "The Creative","The Receptive","Difficulty at Beginning","Youthful Folly",
     "Waiting","Conflict","The Army","Union","Taming","Peace","Standstill","Fellowship",
     "Possession in Great Measure","Modesty","Enthusiasm","Pursuit","Following","Decay","Approach","Contemplation","Biting Through","Grace",
@@ -325,409 +270,357 @@ function computeRings(now){
     "Pull Back","Exhaustion","The Clinging","Fire over Water","Peace","Standstill","Dragon","The Great","Yü","The Gentle",
     "Dispersion","Limitation","Inner Truth","Small Taming","After Completion","Before Completion"
   ];
-  const hexIdx = Math.floor(sec*864/6.5)%64;
+  const hi = Math.floor(sec*864/6.5)%64;
 
-  /* ---- R6: Sephiroth glow ---- */
-  const SEPHIROT = [
-    "Malkuth","Yesod","Netzach","Hod","Tiferet","Geburah","Chesed","Binah","Chokmah","Keter"
-  ];
-  const SEPH_COLOR = [
-    "#557766","#2e5077","#ff8c00","#aa7316","#c9324c",
-    "#9c2222","#2244aa","#223399","#3311aa","#ffffff"
-  ];
-  // Dawn path: 6 sephiroth active, one per ~4 hours based on sunrise
-  let sephIdx = 0;
-  try {
-    // simple: cycle by hour of day through 6 active
-    sephIdx = Math.floor(hr/240*6)%6;
-  } catch(e){}
-  const activeSeph = SEPHIROT[sephIdx];
+  /* ---- R6: Sephiroth ---- */
+  const SEPH=["Malkuth","Yesod","Netzach","Hod","Tiferet","Geburah","Chesed","Binah","Chokmah","Keter"];
+  const SC =["#557766","#2e5077","#ff8c00","#aa7316","#c9324c","#9c2222","#2244aa","#223399","#3311aa","#ffffff"];
+  const si = Math.abs(Math.floor(hr*10)) % 6;
 
-  /* ---- R7: Sacred geometry (flower-of-life, 7 petals) ---- */
+  /* ---- R7: Flower of Life ---- */
   const f7 = sec*TAU/7;
 
-  /* ---- R8: 360 second-ticks + sweep ---- */
-  const sweepAngle = sec*6*DEG; // 360° per minute
-  const hourAngle = hr*30*DEG;
-  const minAngle  = min*6*DEG;
+  /* ---- R9: Muqatta'at ---- */
+  const MQ=[
+    {l:"ا",lat:"ALM",txt:"Alif Lam Mim"},{l:"ق",lat:"QAS",txt:"Qaf Ha 'Ayn Sad"},
+    {l:"ط",lat:"QAF",txt:"Ta Ha"},{l:"ح",lat:"HHA",txt:"Ha Mim"},
+    {l:"ي",lat:"YS",txt:"Ya Sin"},{l:"ت",lat:"TT",txt:"Ta Sin Mim"},
+    {l:"س",lat:"SIN",txt:"Sad"},{l:"ق",lat:"QYF",txt:"Qaf"},
+    {l:"ك",lat:"QR",txt:"Kaf Ha Ya 'Ayn Sad"},{l:"ف",lat:"KF",txt:"KaFaR"},
+    {l:"ه",lat:"HH",txt:"Ha Mim 'Ayn Sin Qaf"},{l:"ع",lat:"AYN",txt:"'Ayn Sin Qaf"},
+    {l:"غ",lat:"GHN",txt:"Ghain"},{l:"ث",lat:"TH",txt:"Throne verse"}
+  ];
+  const ri = Math.floor(((min + sec/60) / (24*60/14) * 14) % 14);
+
+  /* ---- R8: sweep ---- */
+  const sa = sec*6*DEG;
 
   return {
-    R0: {n:R0n, v:R0v, sec:R0sec},
-    R1: {celtic:R1v, hebrew:R1hebrew},
-    R2: {cn:R2cn, islamic:R2islamic},
-    R3: {bodies:R3bodies, sunLng:sunLng, moonLng:moonLng},
-    R4: {phaseName:phaseNames[phaseIdx], illum:phaseIllum, nak:NAKSHATRA[nakIdx]},
-    R5: {ruler:pRuler, iching:ICHING_NAMES[hexIdx]},
-    R6: {seph:activeSeph, idx:sephIdx},
-    R7: {phase:f7},
-    R8: {sweep:sweepAngle},
-    hr,min,sec,
-    sunLng,moonLng
+    R0:{v:now.toISOString().slice(0,19)+'Z'},
+    R1:{v:R1v,hebrew:rh,ha,hf},
+    R2:{cn:R2cn,islamic:R2islamic},
+    R3:{bodies:RB},
+    R4:{phase:PN[pi],illum,nak:NK[ni]},
+    R5:{ruler:pr,iching:IC[hi],pi:pi2},
+    R6:{seph:SEPH[si],i:si},
+    R7:{phase:f7},
+    R8:{sweep:sa},
+    R9:{idx:ri,muq:MQ[ri]},
+    hr,min,sec,unix
   };
 }
 
 /* =========================================================
-   RENDER
+   SCREEN HELPERS
    ========================================================= */
-const RING_R = [0.04,0.10,0.17,0.25,0.33,0.41,0.50,0.60,0.85];
-const RING_W = [1,   1.2, 1.2, 1.4, 1.4, 1.5, 2.0, 2.0, 0.8];
-const RING_C = ['#7b9fe0','#80a8d0','#90b8c0','#a0c0c0','#8dad83','#6b90d0','#c99','#6e7','#4'];
+function onScreen(sx,sy){ return sx>-80 && sx<W+80 && sy>-80 && sy<H+80; }
+function sf(px){ return Math.max(7, px / camZoom) + 'px "SF Mono",monospace'; }
 
-function drawRing(r,gap,innerFrac,label,labelColor){
-  const r0 = innerFrac * Rmax;
-  const r1 = (innerFrac + gap) * Rmax;
-  ctx.beginPath();
-  ctx.arc(cx,cy,(r0+r1)/2,0,TAU);
-  ctx.strokeStyle = labelColor || RING_C[r] || '#556';
-  ctx.lineWidth = (r1-r0)*Rmax;
-  ctx.globalAlpha = 0.35;
-  ctx.stroke();
-  ctx.globalAlpha = 1;
+/* =========================================================
+   DRAW: Ring
+   ========================================================= */
+function rbR(r){
+  const r0 = RING_R[r]*Rmax, r1=(RING_R[r]+0.038)*Rmax;
+  ctx.strokeStyle = RING_C[r] || '#445';
+  ctx.lineWidth = 0.8; ctx.globalAlpha = 0.22;
+  ctx.beginPath(); ctx.arc(0,0,(r0+r1)/2,0,TAU); ctx.stroke();
+}
+function rbL(r, text, col, alpha){
   if(!showLabels && focusRing!==r) return;
-  ctx.save();
-  ctx.globalAlpha = (focusRing===-1||focusRing===r)?1:0.18;
-  ctx.fillStyle = labelColor || '#ccd';
-  ctx.font = '10px "SF Mono",monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(label, cx, r0-2);
-  ctx.restore();
+  const r0 = RING_R[r]*Rmax;
+  ctx.globalAlpha = (focusRing===-1||focusRing===r)? (alpha||0.9) : 0.15;
+  ctx.fillStyle = col||'#b8c4e0';
+  ctx.font = sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+  const sx = wsx(0), sy = wsy(-r0);
+  if(onScreen(sx,sy)) ctx.fillText(text, sx, sy);
 }
 
-function drawZodiacRing(R, data){
-  const r0 = R[3]*Rmax;
-  const r1 = R[3+1]*Rmax - r0;
-  const mid = r0 + r1/2;
-  ctx.save();
-  ctx.strokeStyle = '#445'; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.25;
-  ctx.beginPath(); ctx.arc(cx,cy,(r0+r1)/2,0,TAU); ctx.stroke();
-  ctx.globalAlpha=1;
-  for(let i=0;i<12;i++){
-    const a = i*30*DEG - 90*DEG;
-    const x1=cx+Math.cos(a)*r0, y1=cy+Math.sin(a)*r0;
-    const x2=cx+Math.cos(a)*(r0+r1), y2=cy+Math.sin(a)*(r0+r1);
-    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
-    ctx.strokeStyle = data.bodies[i]?.c || '#556';
-    ctx.lineWidth = 1.2; ctx.globalAlpha=0.85;
-    ctx.stroke();
-    if(showLabels && (focusRing===3||focusRing===-1)){
-      const a2 = a + 0.018;
-      const xl=cx+Math.cos(a2)*(r0+r1+4), yl=cy+Math.sin(a2)*(r0+r1+4);
-      ctx.save(); ctx.fillStyle='#ccd'; ctx.font='9px sans-serif';
-      ctx.textAlign='center'; ctx.fillText(data.bodies[i]?.sign||data.bodies[i]?.name||'',xl,yl);
-      ctx.restore();
-    }
-  }
-  ctx.restore();
-}
-
-function drawCruciform(tickR,angle,length,color,opacity){
-  ctx.save();
-  ctx.strokeStyle = color; ctx.globalAlpha = opacity;
-  ctx.lineWidth=1;
-  const r=tickR*Rmax;
-  const x=cx+Math.cos(angle)*r, y=cy+Math.sin(angle)*r;
-  ctx.beginPath(); ctx.arc(x,y,length*Rmax*0.01,0,TAU); ctx.fill();
-  ctx.restore();
-}
-
+/* =========================================================
+   DRAW: Main
+   ========================================================= */
 function drawCoreGUI(now, R){
-  ctx.clearRect(0,0,W,H);
+  // Camera in world space: 0,0 = center, Rmax = world space
+  ctx.setTransform(dpr*camZoom, 0, 0, dpr*camZoom, (cx+camX)*dpr, (cy+camY)*dpr);
+  ctx.clearRect(-(W/2+camX)/camZoom-5, -(H/2+camY)/camZoom-5, W/camZoom+10, H/camZoom+10);
 
-  // subtle cosmic haze ring behind everything
-  const haze = ctx.createRadialGradient(cx,cy,0,cx,cy,Rmax);
-  haze.addColorStop(0,'rgba(20,30,70,0.15)');
+  // ---- haze ----
+  const haze = ctx.createRadialGradient(0,0,0,0,0,Rmax);
+  haze.addColorStop(0,'rgba(20,30,70,0.20)');
+  haze.addColorStop(0.06,'rgba(25,35,85,0.12)');
   haze.addColorStop(0.5,'rgba(10,15,40,0.05)');
   haze.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle=haze; ctx.globalAlpha=1;
-  ctx.beginPath(); ctx.arc(cx,cy,Rmax,0,TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(0,0,Rmax,0,TAU); ctx.fill();
 
-  // ---- R0: UTC ----
+  // ---- heartbeat ----
+  const beat = 1 + 0.05*Math.sin(R.sec*TAU*0.5);
+  const pr = Math.max(1,(0.012 + 0.004*Math.sin(R.sec*TAU*0.12)) * Math.min(W,H));
+  const pg = ctx.createRadialGradient(0,0,0,0,0,pr/camZoom);
+  pg.addColorStop(0,'rgba(140,170,220,0.85)');
+  pg.addColorStop(0.35,'rgba(100,140,210,0.45)');
+  pg.addColorStop(0.8,'rgba(60,90,160,0.08)');
+  pg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=pg; ctx.globalAlpha=0.85*beat;
+  ctx.beginPath(); ctx.arc(0,0,pr/camZoom,0,TAU); ctx.fill();
+
+  /* ---- Ring backgrounds ---- */
+  rbR(0);
   {
-    const g=0.030;
-    const r1 = (0.04+g)*Rmax;
-    ctx.save();
-    ctx.strokeStyle='#7b9fe0'; ctx.lineWidth=0.8; ctx.globalAlpha=0.25;
-    ctx.beginPath(); ctx.arc(cx,cy,r1,0,TAU); ctx.stroke();
-    if(showLabels||focusRing===0){
-      ctx.globalAlpha=(focusRing===-1||focusRing===0)?0.95:0.2;
-      ctx.fillStyle='#b8c4e0'; ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center';
-      ctx.fillText("UTC",cx,0.04*Rmax-8);
-      ctx.font='bold 10px "SF Mono",monospace';
-      ctx.fillText(R.R0.v,cx,0.04*Rmax+3);
-    }
-    ctx.restore();
+    const r0=0.098, g=0.038;
+    const mid=(r0+g/2)*Rmax;
+    ctx.strokeStyle='#9ab4d8'; ctx.lineWidth=2.8;
+    ctx.globalAlpha=0.85*(0.35+0.65*R.R1.ha);
+    const a0=(R.R1.hf*TAU - 0.5*0.18*TAU) - 0.5*TAU;
+    ctx.beginPath(); ctx.arc(0,0,mid,a0,a0+0.18*TAU); ctx.stroke();
+    ctx.globalAlpha=0.08; ctx.lineWidth=g*Rmax*0.6;
+    ctx.beginPath(); ctx.arc(0,0,mid,a0,a0+0.18*TAU); ctx.stroke();
   }
-
-  // ---- R1: Celtic + Hebrew ----
+  rbR(1);
+  rbR(2);
+  rbR(3);
+  rbR(4);
+  rbR(5);
+  rbR(6);
+  rbR(7);
+  rbR(8);
   {
-    const g=0.035;
-    const r0=0.10, r1=r0+g;
-    ctx.save();
-    ctx.strokeStyle='#80a8d0'; ctx.lineWidth=0.8; ctx.globalAlpha=0.22;
-    ctx.beginPath(); ctx.arc(cx,cy,r1*Rmax,0,TAU); ctx.stroke();
-    if(showLabels||focusRing===1){
-      ctx.globalAlpha=(focusRing===-1||focusRing===1)?0.9:0.15;
-      ctx.fillStyle='#99b8d8';
-      ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center';
-      ctx.fillText("CELTIC / HEBREW",cx,r0*Rmax-6);
-      ctx.font='9px "SF Mono",monospace';
-      ctx.fillText(R.R1.celtic.slice(0,32),cx,r0*Rmax+6);
-      ctx.fillText(R.R1.hebrew.slice(0,28),cx,r0*Rmax+17);
-    }
-    ctx.restore();
+    const r0=0.428, g=0.038;
+    ctx.strokeStyle='#a89c6c'; ctx.lineWidth=0.8; ctx.globalAlpha=0.25;
+    ctx.beginPath(); ctx.arc(0,0,(r0+g/2)*Rmax,0,TAU); ctx.stroke();
+    // active letter comet
+    const idx = R.R9.idx;
+    const ang = (idx/14)*TAU - 0.5*TAU;
+    const rr = r0*Rmax + g*Rmax*0.5;
+    const tx = Math.cos(ang)*rr, ty = Math.sin(ang)*rr;
+    ctx.strokeStyle='#a89c6c'; ctx.globalAlpha=0.45;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(tx,ty); ctx.stroke();
+    // glowing dot at active
+    ctx.fillStyle='#ffe8b0'; ctx.globalAlpha=0.9;
+    ctx.beginPath(); ctx.arc(tx,ty,4/camZoom,0,TAU); ctx.fill();
   }
+  rbR(9);
 
-  // ---- R2: Chinese + Islamic ----
+  /* ---- Labels ---- */
+  rbL(0,"UTC · "+R.R0.v.slice(0,19),'#b8c4e0',0.95);
   {
-    const g=0.035;
-    const r0=0.17, r1=r0+g;
-    ctx.strokeStyle='#90b8c0'; ctx.lineWidth=0.8; ctx.globalAlpha=0.22;
-    ctx.beginPath(); ctx.arc(cx,cy,r1*Rmax,0,TAU); ctx.stroke();
-    if(showLabels||focusRing===2){
-      ctx.globalAlpha=(focusRing===-1||focusRing===2)?0.9:0.15;
-      ctx.fillStyle='#a8c8c0';
-      ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center';
-      ctx.fillText("CHINESE / ISLAMIC",cx,r0*Rmax-7);
-      ctx.font='11px sans-serif';
-      ctx.fillText(R.R2.cn,cx,r0*Rmax+5);
-      ctx.font='9px "SF Mono",monospace';
-      ctx.fillText(R.R2.islamic,cx,r0*Rmax+17);
+    const r0=0.098;
+    ctx.globalAlpha=(focusRing===-1||focusRing===1)?0.9:0.15;
+    ctx.fillStyle='#a0b8d0';
+    ctx.font = sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    const sx=wsx(0), sy=wsy(-r0*Rmax);
+    if(onScreen(sx,sy)){
+      ctx.fillText("CELTIC / HEBREW / ACTIVITY", sx, sy-6);
+      ctx.save(); ctx.globalAlpha*=0.55; ctx.font=sf(8);
+      ctx.fillText("◐ "+R.R1.ha.toFixed(2), sx, sy-0); ctx.restore();
+      ctx.fillText(R.R1.v.slice(0,26), sx, sy+6);
+      ctx.font=sf(9); ctx.fillText(R.R1.hebrew.slice(0,22), sx, sy+17);
     }
   }
-
-  // ---- R3: Zodiac + planets ----
-  drawZodiacRing(RING_R, R);
-  if(showLabels||focusRing===3){
-    ctx.save();
-    const r0=0.25*Rmax, r1=0.04*Rmax;
-    ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.95:0.15;
-    ctx.fillStyle='#ccd'; ctx.font='9px "SF Mono",monospace';
-    ctx.textAlign='center';
-    ctx.fillText("PLANETS",cx,r0-8);
+  {
+    ctx.globalAlpha=(focusRing===-1||focusRing===2)?0.9:0.15;
+    ctx.fillStyle='#a8c8c0';
+    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    const sx=wsx(0), sy=wsy(-0.166*Rmax);
+    ctx.fillText("CHINESE / ISLAMIC", sx, sy-7);
+    ctx.font='11px sans-serif';
+    ctx.fillText(R.R2.cn, sx, sy+5);
+    ctx.font=sf(9);
+    ctx.fillText(R.R2.islamic, sx, sy+17);
+  }
+  {
+    ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.9:0.15;
+    ctx.fillStyle='#a0c0c0';
+    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText("PLANETS", wsx(0), wsy(-0.244*Rmax)-8);
     R.R3.bodies.forEach((b,i)=>{
       const a = (i/7)*TAU - 0.5;
-      ctx.fillStyle=b.c||'#abc';
-      ctx.fillText(b.name+b.sign,cx+Math.cos(a)*r1,cy+Math.sin(a)*r1+3);
+      const px = Math.cos(a)*0.04*Rmax, py = Math.sin(a)*0.04*Rmax;
+      ctx.fillStyle = b.c || '#abc';
+      ctx.fillText(b.n+b.s, wsx(px), wsy(py)+3);
     });
-    ctx.restore();
-  }
-
-  // ---- R4: Moon phase + nakshatra ----
-  {
-    const g=0.044;
-    const r0=RING_R[4], r1=r0+g;
-    ctx.save();
-    ctx.strokeStyle='#8dad83'; ctx.globalAlpha=0.22;
-    ctx.lineWidth=1;
-    const rmid = (r0+r1/2)*Rmax;
-    ctx.beginPath(); ctx.arc(cx,cy,rmid,0,TAU); ctx.stroke();
-    // phase marker
-    const a = R.R4.phaseFrac*TAU;
-    const px = cx+Math.cos(a)*rmid, py = cy+Math.sin(a)*rmid;
-    ctx.fillStyle='#cfe'; ctx.globalAlpha=0.9;
-    ctx.beginPath(); ctx.arc(px,py,2.2,0,TAU); ctx.fill();
-    ctx.globalAlpha=0.35;
-    ctx.beginPath(); ctx.arc(cx,cy,(r0+0.015)*Rmax,0,TAU); ctx.stroke();
-    ctx.restore();
-    if(showLabels||focusRing===4){
-      ctx.save();
-      ctx.globalAlpha=(focusRing===-1||focusRing===4)?0.9:0.15;
-      ctx.fillStyle='#a8c8a0'; ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center'; ctx.fillText("MOON",cx,r0*Rmax-6);
-      ctx.fillText(R.R4.phaseName+" ["+(R.R4.illum*100).toFixed(1)+"%]",cx,r0*Rmax+5);
-      ctx.font='9px sans-serif'; ctx.fillStyle='#90a888';
-      ctx.fillText("nak "+R.R4.nak,cx,r0*Rmax+17);
-      ctx.restore();
+    // sign names at outer zodiac ring
+    for(let i=0;i<12;i++){
+      const a = i*30*DEG - 90*DEG;
+      const r = 0.264*Rmax;
+      const xl = wsx(Math.cos(a)*r + 0.008*Rmax*Math.cos(a+0.01));
+      const yl = wsy(Math.sin(a)*r + 0.008*Rmax*Math.sin(a+0.01));
+      if(onScreen(xl,yl)){
+        ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.55:0.1;
+        ctx.fillStyle='#99a'; ctx.font=sf(9);
+        ctx.fillText(ZN[i], xl, yl);
+      }
     }
   }
-
-  // ---- R5: Planetary hour + I Ching ----
   {
-    const g=0.040;
-    const r0=RING_R[5], r1=r0+g;
-    ctx.save();
-    ctx.strokeStyle='#6b90d0'; ctx.globalAlpha=0.22;
-    ctx.lineWidth=1;
-    const rmid=(r0+r1/2)*Rmax;
-    ctx.beginPath(); ctx.arc(cx,cy,rmid,0,TAU); ctx.stroke();
-    // planetary ruler glow
-    const a = (R.R5.ruler.charCodeAt(0)*37%360)*DEG;
-    const px=cx+Math.cos(a)*rmid, py=cy+Math.sin(a)*rmid;
-    ctx.fillStyle='#6af'; ctx.globalAlpha=0.85;
-    ctx.beginPath(); ctx.arc(px,py,2.8,0,TAU); ctx.fill();
-    ctx.restore();
-    if(showLabels||focusRing===5){
-      ctx.save();
-      ctx.globalAlpha=(focusRing===-1||focusRing===5)?0.9:0.15;
-      ctx.fillStyle='#8ab'; ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center';
-      ctx.fillText("PLANETARY HR",cx,r0*Rmax-6);
-      ctx.fillText("Ruler "+R.R5.ruler,cx,r0*Rmax+5);
-      ctx.font='9px sans-serif'; ctx.fillStyle='#7898aa';
-      ctx.fillText("Hexagram "+R.R5.iching.slice(0,16),cx,r0*Rmax+17);
-      ctx.restore();
-    }
+    const r0=0.324;
+    ctx.globalAlpha=(focusRing===-1||focusRing===4)?0.9:0.15;
+    ctx.fillStyle='#a8c8a0';
+    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    const sx=wsx(0), sy=wsy(-r0*Rmax);
+    ctx.fillText("MOON", sx, sy-6);
+    ctx.fillText(R.R4.phase + " ["+(R.R4.illum*100).toFixed(1)+"%]", sx, sy+5);
+    ctx.fillStyle='#90a888'; ctx.font=sf(9);
+    ctx.fillText("nak "+R.R4.nak, sx, sy+17);
   }
-
-  // ---- R6: Sephiroth glow ----
   {
-    const g=0.043;
-    const r0=RING_R[6], r1=r0+g;
-    ctx.save();
-    ctx.strokeStyle=SEPH_COLOR[R.R6.idx%10]; ctx.globalAlpha=0.35;
-    ctx.lineWidth=1.2;
-    ctx.beginPath(); ctx.arc(cx,cy,r0*Rmax,0,TAU); ctx.stroke();
-    // active path
-    const a0 = (sephIdx/6)*TAU;
-    ctx.strokeStyle=SEPH_COLOR[R.R6.idx%10]||'#a8af';
-    ctx.globalAlpha=0.70; ctx.lineWidth=3;
-    ctx.beginPath();
-    ctx.arc(cx,cy,r1*Rmax, a0, a0+TAU/6);
-    ctx.stroke();
-    ctx.restore();
-    if(showLabels||focusRing===6){
-      ctx.save();
-      ctx.globalAlpha=(focusRing===-1||focusRing===6)?0.9:0.15;
-      ctx.fillStyle=SEPH_COLOR[R.R6.idx%10]; ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center';
-      ctx.fillText("SEPHIROTH",cx,r0*Rmax-6);
-      ctx.font='bold 10px "SF Mono",monospace';
-      ctx.fillText(R.R6.seph,cx,r0*Rmax+5);
-      ctx.restore();
-    }
+    const r0=0.500;
+    ctx.globalAlpha=(focusRing===-1||focusRing===5)?0.9:0.15;
+    ctx.fillStyle='#8ab';
+    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    const sx=wsx(0), sy=wsy(-r0*Rmax);
+    ctx.fillText("PLANETARY HR · "+R.R5.ruler, sx, sy-6);
+    ctx.font=sf(9);
+    ctx.fillText("Hexagram "+(R.R5.iching||'').slice(0,18), sx, sy+5);
   }
-
-  // ---- R7: Flower of Life, 7-petal rotation ----
   {
-    const g=0.040;
-    const r0=RING_R[7];
-    ctx.save();
-    ctx.globalAlpha=0.18; ctx.strokeStyle='#6e7';
-    ctx.lineWidth=0.8;
-    const mid = (r0+g/2)*Rmax;
-    // 6 circles on 6-fold
+    const r0=0.580;
+    ctx.strokeStyle=SC[si]; ctx.lineWidth=1.2; ctx.globalAlpha=0.35;
+    ctx.beginPath(); ctx.arc(0,0,(RING_R[6]*Rmax),0,TAU); ctx.stroke();
+    const a0=(R.R6.i/6)*TAU;
+    ctx.strokeStyle=SC[si]; ctx.globalAlpha=0.70; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(0,0,(RING_R[6]+0.038)*Rmax,a0,a0+TAU/6); ctx.stroke();
+    ctx.globalAlpha=(focusRing===-1||focusRing===6)?0.9:0.15;
+    ctx.fillStyle=SC[si]; ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText("SEPHIROTH", wsx(0), wsy(-r0*Rmax)-6);
+    ctx.font='bold ' + sf(10);
+    ctx.fillText(R.R6.seph, wsx(0), wsy(-r0*Rmax)+5);
+  }
+  {
+    const r0=0.666;
+    ctx.globalAlpha=0.18; ctx.strokeStyle='#6e7'; ctx.lineWidth=0.8;
+    const mid = (r0+0.038/2)*Rmax;
     for(let k=0;k<7;k++){
       const a = R.R7.phase + k*TAU/7;
-      const dc = mid*0.5, px=cx+Math.cos(a)*dc, py=cy+Math.sin(a)*dc;
+      const dc = mid*0.5, px=Math.cos(a)*dc, py=Math.sin(a)*dc;
       ctx.beginPath(); ctx.arc(px,py,mid*0.28,0,TAU); ctx.stroke();
     }
-    // center circle
     ctx.lineWidth=1; ctx.globalAlpha=0.22;
-    ctx.beginPath(); ctx.arc(cx,cy,mid*0.28,0,TAU); ctx.stroke();
-    ctx.restore();
+    ctx.beginPath(); ctx.arc(0,0,mid*0.28,0,TAU); ctx.stroke();
     if(showLabels||focusRing===7){
-      ctx.save();
       ctx.globalAlpha=(focusRing===-1||focusRing===7)?0.75:0.12;
-      ctx.fillStyle='#6e7'; ctx.font='9px "SF Mono",monospace';
-      ctx.textAlign='center';
-      ctx.fillText("FLOWER · Π",cx,r0*Rmax-4);
-      ctx.restore();
+      ctx.fillStyle='#6e7'; ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText("FLOWER · Π", wsx(0), wsy(-r0*Rmax)-4);
     }
   }
-
-  // ---- R8: outer tickmarks (360°) + sweep + time hands ----
   {
-    const outF = R[8];
-    const r0=(R[8]-0.012)*Rmax, r1=R[8]*Rmax;
-    ctx.save();
+    // Outer ticks
+    const r0=(RING_R[8]-0.012)*Rmax, r1=RING_R[8]*Rmax;
     ctx.strokeStyle='#3d4a6b'; ctx.lineWidth=0.5;
     for(let i=0;i<360;i++){
       const a = i*DEG - 90*DEG;
-      const major = (i%30===0), minor = (i%5===0);
+      const major=(i%30===0), minor=(i%5===0);
       const l = major?6:minor?3.5:1.2;
       if(!major && !minor && i%1!==0) continue;
       ctx.beginPath();
-      ctx.moveTo(cx+Math.cos(a)*(r1-l), cy+Math.sin(a)*(r1-l));
-      ctx.lineTo(cx+Math.cos(a)*r1, cy+Math.sin(a)*r1);
+      ctx.moveTo(Math.cos(a)*(r1-l), Math.sin(a)*(r1-l));
+      ctx.lineTo(Math.cos(a)*r1, Math.sin(a)*r1);
       if(major){ ctx.globalAlpha=0.6; ctx.lineWidth=0.8; }
       else if(minor){ ctx.globalAlpha=0.35; ctx.lineWidth=0.6; }
       else{ ctx.globalAlpha=0.14; ctx.lineWidth=0.4; }
       ctx.stroke();
     }
-    // sweep second (within ring 8 zone)
-    ctx.save();
-    ctx.globalAlpha=0.9;
-    const swR = R[8]*Rmax;
+    // hands
+    ctx.save(); ctx.globalAlpha=0.9;
+    const swR = RING_R[8]*Rmax;
     ctx.strokeStyle='#7b9fe0'; ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.moveTo(cx,cy);
-    ctx.lineTo(cx+Math.cos(R.R8.sweep-90*DEG)*swR,
-               cy+Math.sin(R.R8.sweep-90*DEG)*swR);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR, Math.sin(R.R8.sweep-90*DEG)*swR); ctx.stroke();
     // minute
+    const mm = RING_R[7]-0.02;
     ctx.strokeStyle='#b8c4e0'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.moveTo(cx,cy);
-    ctx.lineTo(cx+Math.cos(R.min*6*DEG-90*DEG)*R[7]*Rmax*0.88,
-               cy+Math.sin(R.min*6*DEG-90*DEG)*R[7]*Rmax*0.88);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.min*6*DEG-90*DEG)*mm*Rmax, Math.sin(R.min*6*DEG-90*DEG)*mm*Rmax); ctx.stroke();
     // hour
+    const hh = RING_R[7]-0.05;
     ctx.strokeStyle='#dde'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(cx,cy);
-    ctx.lineTo(cx+Math.cos(R.hr*30*DEG-90*DEG)*R[7]*Rmax*0.70,
-               cy+Math.sin(R.hr*30*DEG-90*DEG)*R[7]*Rmax*0.70);
-    ctx.stroke();
-    // center
+    ctx.beginPath(); ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.hr*30*DEG-90*DEG)*hh*Rmax, Math.sin(R.hr*30*DEG-90*DEG)*hh*Rmax); ctx.stroke();
     ctx.fillStyle='#7b9fe0'; ctx.globalAlpha=0.9;
-    ctx.beginPath(); ctx.arc(cx,cy,2.2,0,TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(0,0,2.2/camZoom,0,TAU); ctx.fill();
     ctx.restore();
   }
 
-  // ---- focal ring highlight if ring hover chosen ----
-  if(focusRing>=0){
-    const rf = RING_R[focusRing], g=0.05;
+  // ---- R9 Label ----
+  if(showLabels || focusRing===9){
+    const r0=0.428*Rmax;
+    ctx.globalAlpha=(focusRing===-1||focusRing===9)?0.85:0.12;
+    ctx.fillStyle='#c9a860'; ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText("MUQATTA'AT", wsx(0), wsy(-r0+RING_C[9]*0 + 6)); // simple label
+    const mq = R.R9.muq;
+    ctx.font=sf(9); ctx.fillStyle='#887'; ctx.globalAlpha*=0.6;
+    ctx.fillText((mq?mq.lat:'')+' · '+(mq?mq.txt.slice(0,12):''), wsx(0), wsy(-r0+18));
+  }
+
+  // ---- focal ring highlight ----
+  if(focusRing >= 0){
+    const rf = RING_R[focusRing];
     ctx.save();
     ctx.strokeStyle='rgba(123,159,224,0.6)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.arc(cx,cy,rf*Rmax,0,TAU); ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx,cy,(rf+g)*Rmax,0,TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,rf*Rmax,0,TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,(rf+0.038)*Rmax,0,TAU); ctx.stroke();
     ctx.restore();
   }
 }
 
-/* ---- Info panel ---- */
-function updateInfo(R){
+/* =========================================================
+   INFO PANEL
+   ========================================================= */
+function updateInfo(R, now){
   const el = document.getElementById('info');
-  const line = (a,b)=>`<span class="val">${a}</span><span class="sep">·</span>${b}`;
+  const ln = (a,b)=>`<span class="val">${a}</span><span class="sep">·</span>${b}`;
   el.innerHTML = [
-    line('UTC', R.R0.v),
-    line('CELTIC', R.R1.celtic.slice(0,30)),
-    line('HEBREW', R.R1.hebrew),
-    line('CHINESE', R.R2.cn),
-    line('ISL', R.R2.islamic),
-    line('MOON', R.R4.phaseName+' '+R.R4.nak),
-    line('HR', R.R5.ruler+' '+R.R5.iching.slice(0,18)),
-    line('SEPH', R.R6.seph),
+    ln('UTC', R.R0.v),
+    ln('CELTIC', R.R1.v.slice(0,26)),
+    ln('HEBREW', R.R1.hebrew.slice(0,22)),
+    ln('CHINESE', R.R2.cn),
+    ln('ISL', R.R2.islamic),
+    ln('MOON', R.R4.phase+' '+R.R4.nak),
+    ln('HR', R.R5.ruler+' '+R.R5.iching.slice(0,14)),
+    ln('SEPH', R.R6.seph),
+    ln('MUQ', (R.R9.muq?R.R9.muq.lat:'')+' · '+(R.R9.muq?R.R9.muq.txt.slice(0,12):'')),
+    ln('SEED', dailySeed ? dailySeed.seed : ''),
   ].map(s=>`<div>${s}</div>`).join('');
 }
 
-/* ---- HTTPS page clock ---- */
+/* =========================================================
+   LOOP
+   ========================================================= */
 function loop(){
   const now = new Date();
   const R = computeRings(now);
-  drawCoreGUI(now,R);
-  if(showLabels) updateInfo(R);
+  dailySeed = loadDailySeed(now, R);
+  drawCoreGUI(now, R);
+  updateInfo(R, now);
+  document.getElementById('seed').textContent =
+    "COHERENT · " + now.toISOString().slice(0,10) + " · " + dailySeed.seed;
   const sec = Math.floor(now.getTime()/1000);
-  if(sec !== lastSec){
-    lastSec = sec;
-    document.title = R.R0.v + ' · COSMIC CLOCK';
-  }
+  if(sec !== lastSec){ lastSec = sec; document.title = R.R0.v.slice(0,19) + ' · COSMIC CLOCK'; }
   requestAnimationFrame(loop);
 }
 
-/* ---- keyboard ---- */
-window.addEventListener('keydown',e=>{
+/* =========================================================
+   KEYBOARD
+   ========================================================= */
+window.addEventListener('keydown', e=>{
   const k = e.key;
-  if(k==='h'||k==='H'){ showLabels=!showLabels; document.getElementById('info').style.opacity=showLabels?1:0; }
+  if(k==='h'||k==='H'){
+    showLabels=!showLabels;
+    document.getElementById('info').style.opacity = showLabels ? '1' : '0';
+  }
   if(k==='f'||k==='F'){
     if(document.fullscreenElement) document.exitFullscreen();
     else document.body.requestFullscreen().catch(()=>{});
   }
-  if(k>='1'&&k<='9'){ focusRing = parseInt(k)-1; }
-  if(k==='0'||k==='Escape'){ focusRing=-1; }
+  if(k>='1' && k<='9') focusRing = parseInt(k)-1;
+  if(k==='0' || k==='Escape') focusRing = -1;
+  if(k==='r' || k==='R'){ camX=0; camY=0; camZoom=1; }
+  if(k==='?'){
+    const h = document.getElementById('help');
+    h.style.display = h.style.display==='none' ? 'flex' : 'none';
+  }
+  if(k==='`') canvas.style.cursor = canvas.style.cursor==='none' ? 'grab' : 'none';
 });
-document.getElementById('info').style.opacity='1';
+document.getElementById('info').style.opacity = '1';
 
 resize();
 loop();
