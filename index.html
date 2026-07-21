@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>COSMIC CLOCK v2</title>
+<title>COSMIC CLOCK</title>
 <style>
   :root{--bg:#05070f;--ink:#b8c4e0;--mute:#3d4a6b;--glow:#7b9fe0;--panel:#0a0f1f}
   *{margin:0;padding:0;box-sizing:border-box}
@@ -11,298 +11,236 @@
     font-family:'SF Mono','Menlo',monospace;overflow:hidden}
   canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
   canvas:active{cursor:grabbing}
-  #seed{
-    position:fixed;top:8px;left:10px;font-size:10px;letter-spacing:.3em;
-    color:var(--mute);text-transform:uppercase;
-    transition:color 0.4s;
-  }
-  .kbd{
-    position:fixed;top:8px;right:10px;font-size:10px;color:var(--mute);
+  #seed{position:fixed;top:8px;left:10px;font-size:10px;letter-spacing:.3em;
+    color:var(--mute);text-transform:uppercase;transition:color 0.4s}
+  .kbd{position:fixed;top:8px;right:10px;font-size:10px;color:var(--mute);
     background:var(--panel);border:1px solid rgba(123,159,224,.18);
-    padding:3px 8px;border-radius:4px;
-  }
-  #info{
-    position:fixed;bottom:0;left:0;right:0;
+    padding:3px 8px;border-radius:4px}
+  #info{position:fixed;bottom:0;left:0;right:0;
     background:linear-gradient(transparent,rgba(5,7,15,.95));
     padding:6px 14px;font-size:11px;color:var(--mute);
     display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 18px;
-    border-top:1px solid rgba(123,159,224,.12);pointer-events:none;
-  }
+    border-top:1px solid rgba(123,159,224,.12);pointer-events:none}
   #info .val{color:var(--ink);margin-right:6px}
   #info .sep{color:var(--mute);opacity:.5}
-  #help{
-    position:fixed;bottom:0;left:0;right:0;
-    background:var(--panel);border-top:1px solid rgba(123,159,224,.18);
-    padding:4px 14px;font-size:10px;color:var(--mute);
-    gap:6px 18px;pointer-events:none;
-    display:none;
-  }
+  #help{position:fixed;bottom:0;left:0;right:0;background:var(--panel);
+    border-top:1px solid rgba(123,159,224,.18);padding:4px 14px;font-size:10px;
+    color:var(--mute);gap:6px 18px;pointer-events:none;display:none}
 </style>
 </head>
 <body>
-<div id="seed">DAILY SEED · ———</div>
+<div id="seed">COHERENT · ——— · ————</div>
 <canvas id="C"></canvas>
-<div class="kbd" id="kbd">H labels · F full · ` drag · ⇧ wheel zoom · R reset · ? help</div>
+<div class="kbd">H labels · F full · ` drag · ⇧ zoom · R reset · ? help</div>
 <div id="info"></div>
 <div id="help"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.9/astronomy.min.js"></script>
 <script>
 /* =========================================================
-   COSMIC CLOCK v2 — 10 esoteric rings + camera + daily seed + pp
+   COSMIC CLOCK — 10 rings · camera · daily seed · pluggable
    ========================================================= */
 
-const canvas = document.getElementById('C');
-const ctx = canvas.getContext('2d');
-let W,H,dpr,cx,cy;
+const C = document.getElementById('C');
+const $ = C.getContext('2d');
+let W,H,dpr,cx,cy,Rmax;
 let showLabels = true;
 let focusRing = -1;
 let lastSec = -1;
 
 // Camera
-let camX=0, camY=0, camZoom=1;
+let camX=0, camY=0, camZ=1;
 let drag=null;
 
 // Daily seed
-let dailySeed = null;
+let seed = null;
 
-const DEG = Math.PI/180;
-const TAU = Math.PI*2;
+const DEG=Math.PI/180, TAU=Math.PI*2;
 
-/* =========================================================
-   RESIZE
-   ========================================================= */
 function resize(){
-  dpr = window.devicePixelRatio || 1;
-  W = canvas.clientWidth; H = canvas.clientHeight;
-  canvas.width = W*dpr; canvas.height = H*dpr;
-  cx = W/2; cy = H/2;
+  dpr=window.devicePixelRatio||1;
+  W=C.clientWidth; H=C.clientHeight;
+  C.width=W*dpr; C.height=H*dpr;
+  cx=W/2; cy=H/2;
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize',resize);
 
 /* =========================================================
-   DAILY SEED — date-anchored deterministic hash
-   Derives from: date | iching | planetary ruler | nakshatra | sephi
+   DAILY SEED
    ========================================================= */
-function makeDailySeed(now, R){
-  const d = now.toISOString().slice(0,10);
-  const src = d + '|' + R.R5.iching + '|' + R.R5.ruler + '|' + (R.R4.nak||'').slice(0,4) + '|' + (R.R6.seph||'');
-  let h = 0;
-  for(let i=0;i<src.length;i++) h = ((h << 5) - h + src.charCodeAt(i));
-  const seed = Math.abs(h|0).toString(16).toUpperCase().padStart(8,'0');
-  dailySeed = {date:d, seed, iching:R.R5.iching, ruler:R.R5.ruler, seph:R.R6.seph, nak:R.R4.nak};
-  try { localStorage.setItem('cosmicClockDaily', JSON.stringify(dailySeed)); } catch(e){}
-  try { history.replaceState(null,'', '#seed='+seed); } catch(e){}
-  return dailySeed;
+function makeSeed(now,R){
+  const d=now.toISOString().slice(0,10);
+  const src=d+'|'+(R.R5.iching||'')+'|'+(R.R5.ruler||'')+'|'+(R.R4.nak||'').slice(0,4)+'|'+(R.R6.seph||'');
+  let h=0; for(let i=0;i<src.length;i++) h=((h<<5)-h+src.charCodeAt(i));
+  const s=Math.abs(h|0).toString(16).toUpperCase().padStart(8,'0');
+  seed={date:d,seed:s,iching:R.R5.iching,ruler:R.R5.ruler,seph:R.R6.seph,nak:R.R4.nak};
+  try{localStorage.setItem('ccDaily',JSON.stringify(seed))}catch(e){}
+  try{history.replaceState(null,'','#seed='+s)}catch(e){}
+  return seed;
 }
-function loadDailySeed(now, R){
-  const saved = (()=>{ try { return JSON.parse(localStorage.getItem('cosmicClockDaily')); } catch(e){ return null; } })();
-  if(saved && saved.date === now.toISOString().slice(0,10)) return saved;
-  return makeDailySeed(now, R);
+function loadSeed(now,R){
+  try{const s=JSON.parse(localStorage.getItem('ccDaily'));if(s&&s.date===now.toISOString().slice(0,10))return s}catch(e){}
+  return makeSeed(now,R);
 }
 
 /* =========================================================
-   CAMERA EVENTS
+   CAMERA
    ========================================================= */
-canvas.addEventListener('mousedown', e=>{
-  drag = {x:e.clientX, y:e.clientY, cx:camX, cy:camY};
-  canvas.style.cursor='grabbing';
-});
-window.addEventListener('mousemove', e=>{
-  if(!drag) return;
-  camX = drag.cx + (e.clientX - drag.x);
-  camY = drag.cy + (e.clientY - drag.y);
-});
-window.addEventListener('mouseup', ()=>{ drag=null; canvas.style.cursor='grab'; });
-canvas.addEventListener('wheel', e=>{
+C.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,cx:camX,cy:camY};C.style.cursor='grabbing'});
+window.addEventListener('mousemove',e=>{if(!drag)return;camX=drag.cx+(e.clientX-drag.x);camY=drag.cy+(e.clientY-drag.y)});
+window.addEventListener('mouseup',()=>{drag=null;C.style.cursor='grab'});
+C.addEventListener('wheel',e=>{
   e.preventDefault();
-  const delta = e.deltaY > 0 ? -0.06 : 0.06;
-  const newZoom = Math.max(0.35, Math.min(5, camZoom * (1 + delta)));
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left - cx;
-  const my = e.clientY - rect.top - cy;
-  const ratio = newZoom / camZoom;
-  camX = e.clientX - rect.left - cx - ratio * (e.clientX - rect.left - cx - camX);
-  camY = e.clientY - rect.top - cy - ratio * (e.clientY - rect.top - cy - camY);
-  camZoom = newZoom;
-}, {passive:false});
+  const d=e.deltaY>0?-0.06:0.06;
+  const nz=Math.max(0.35,Math.min(5,camZ*(1+d)));
+  const r=C.getBoundingClientRect();
+  const mx=e.clientX-r.left-cx,my=e.clientY-r.top-cy;
+  const ratio=nz/camZ;
+  camX=e.clientX-r.left-cx-ratio*(e.clientX-r.left-cx-camX);
+  camY=e.clientY-r.top-cy-ratio*(e.clientY-r.top-cy-camY);
+  camZ=nz;
+},{passive:false});
 
 /* =========================================================
-   WORLD → SCREEN
+   COORDINATES
    ========================================================= */
-function wsx(wx){ return wx * camZoom + cx + camX; }
-function wsy(wy){ return wy * camZoom + cy + camY; }
-function sf(px){ return Math.max(7, px / camZoom) + 'px "SF Mono",monospace'; }
+function wsx(wx){return wx*camZ+cx+camX}
+function wsy(wy){return wy*camZ+cy+camY}
+function onScr(sx,sy){return sx>-100&&sx<W+100&&sy>-100&&sy<H+100}
+function fs(px){return Math.max(7,px/camZ)+'px "SF Mono",monospace'}
 
 /* =========================================================
-   RING DATA — bottom of computeRings returns the canonical set
+   RING LAYOUT — data-driven
    ========================================================= */
-const RING_R = [0.030,0.098,0.166,0.244,0.324,0.500,0.580,0.666,0.794,0.428];
-const RING_C = ['#7b9fe0','#7488b8','#88a09a','#88a0a0','#90a888','#7b9fe0','#8c5c3d','#6e7','#3d4a6b','#a89c6c'];
+// 10 rings: fraction of Rmax from center
+// R0=UTC, R1=Celtic/Hebrew, R2=Chinese/Islamic, R3=Zodiac, R4=Moon,
+// R5=Planetary, R6=Sephiroth, R7=Flower, R8=Ticks, R9=Muqatta'at
+const RR=[0.032,0.100,0.168,0.246,0.324,0.500,0.580,0.668,0.794,0.428];
+const RC=['#7b9fe0','#7488b8','#88a09a','#88a0a0','#90a888','#7b9fe0','#8c5c3d','#6e7','#3d4a6b','#a89c6c'];
+const RG=0.038;
 
-function computeRings(now){
-  const unix = now.getTime();
-  const ms = now.getMilliseconds();
-  const sec = now.getSeconds() + ms/1000;
-  const min = now.getMinutes() + sec/60;
-  const hr = now.getHours() + min/60;
-  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+function rbRing(i){
+  const r0=RR[i]*Rmax, r1=(RR[i]+RG)*Rmax;
+  $.strokeStyle=RC[i]||'#445';$.lineWidth=0.8;$.globalAlpha=0.22;
+  $.beginPath();$.arc(0,0,(r0+r1)/2,0,TAU);$.stroke();
+}
 
-  /* ---- Observer ---- */
-  let obs = null;
-  function makeObserver(){
-    try {
-      let o = null;
-      try { o = new AstronomyEngine.Observer(40.71, -74.01, 10); }
-      catch(e){
-        try { o = new AstronomyEngine.Observer({latitude:40.71, longitude:-74.01, elevation:10}); }
-        catch(e2){ o = null; }
-      }
-      if(o) return o;
-      if(navigator && navigator.geolocation){
-        navigator.geolocation.getCurrentPosition(pos=>{
-          try {
-            const p = pos.coords;
-            obs = new AstronomyEngine.Observer(
-              Math.max(-90,Math.min(90,p.latitude)),
-              Math.max(-180,Math.min(180,p.longitude)),
-              Math.max(0,(p.altitude||0))
-            );
-          } catch(e){}
-        },()=>{},{timeout:8000});
-      }
-      return o;
-    } catch(e){ return null; }
-  }
-  obs = makeObserver();
+/* =========================================================
+   RING DATA
+   ========================================================= */
+function compute(now){
+  const unix=now.getTime();
+  const ms=now.getMilliseconds();
+  const sec=now.getSeconds()+ms/1000;
+  const min=now.getMinutes()+sec/60;
+  const hr=now.getHours()+min/60;
+  const day=new Date(now.getFullYear(),now.getMonth(),now.getDate());
 
-  /* ---- AE helper ---- */
-  let ae = null;
-  try{ ae = AstronomyEngine; } catch(e){ ae = null; }
-  function aePlanet(name){
-    if(!ae) return 0;
-    const map = {sun:'Sun',moon:'Moon',mercury:'Mercury',venus:'Venus',mars:'Mars',jupiter:'Jupiter',saturn:'Saturn'};
-    const b = map[name];
-    if(!b) return 0;
-    try{
-      const e = ae.Geocentric(day, ae[b], obs);
-      return (e.eclipticLongitude*180/Math.PI+360)%360;
-    }catch(e){ return 0; }
-  }
-  const sunLng  = aePlanet('sun');
-  const moonLng = aePlanet('moon');
-  const mercLng = aePlanet('mercury');
-  const venLng  = aePlanet('venus');
-  const marsLng = aePlanet('mars');
-  const jupLng  = aePlanet('jupiter');
-  const satLng  = aePlanet('saturn');
-
-  /* ---- R1: Celtic / Hebrew / Activity ---- */
-  const CELTIC = "Birch Rowan Ash Alder Willow Hawthorn Oak Holly Hazel Vine Ivy Reed Elder".split(' ');
-  const yday = Math.floor((now - new Date(now.getFullYear(),0,1))/864e5);
-  const cdy = (yday+3) % 365;
-  const ci = Math.floor(cdy/28), cd = (cdy%28)+1;
-  const ct = CELTIC[ci % 13];
-  let rh = "", ha = 0.5, hf = 0;
-  try {
-    const fmt = new Intl.DateTimeFormat('en-US',{
-      calendar:'hebrew',year:'numeric',month:'long',day:'numeric',
-      hour:'numeric',minute:'numeric',second:'numeric',hour12:false
-    });
-    rh = fmt.format(now).split(',')[0].trim();
-    const m = rh.match(/(\d+)(?:st|nd|rd|th)?\s*,\s*(\d{4})/);
-    if(m){
-      hf = Math.max(0, Math.min(1, (parseFloat(m[1])-1) / 29));
-      const lh = (now.getHours() + now.getMinutes()/60 + now.getSeconds()/3600) % 24;
-      ha = 0.5 + 0.5*Math.cos((lh - 12)/12*Math.PI);
+  // Observer
+  let obs=null;
+  try{
+    try{obs=new AstronomyEngine.Observer(40.71,-74.01,10)}
+    catch(e){try{obs=new AstronomyEngine.Observer({latitude:40.71,longitude:-74.01,elevation:10})}catch(e2){obs=null}}
+    if(!obs&&navigator&&navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(p=>{
+        try{obs=new AstronomyEngine.Observer(Math.max(-90,Math.min(90,p.coords.latitude)),Math.max(-180,Math.min(180,p.coords.longitude)),Math.max(0,p.coords.altitude||0))}catch(e){}
+      },()=>{},{timeout:8000});
     }
-  } catch(e){ rh = "Hebrew ≈ " + now.getFullYear(); }
-  const R1v = "Celtic N"+(ci+1)+"·"+cd+" ("+ct+")";
+  }catch(e){}
 
-  /* ---- R2: Chinese / Islamic ---- */
-  const S = "甲乙丙丁戊己庚辛壬癸".split('');
-  const B = "子丑寅卯辰巳午未申酉戌亥".split('');
-  const A = "Rat Ox Tiger Rabbit Dragon Snake Horse Goat Monkey Rooster Dog Pig".split(' ');
-  const CNY = Date.UTC(2024,1,10);
-  const i60 = ((Math.floor((unix - CNY)/864e5) % 60) + 60) % 60;
-  const R2cn = S[i60%10] + B[i60%12] + " " + A[i60%12] + "年";
-  const R2islamic = "ISL " + (Math.floor((unix/864e5 + 2440587.5 - 1948439.5) / 354.36667) + 1);
+  let ae=null;
+  try{ae=AstronomyEngine}catch(e){}
+  function aeP(n){
+    if(!ae)return 0;
+    const m={sun:'Sun',moon:'Moon',mercury:'Mercury',venus:'Venus',mars:'Mars',jupiter:'Jupiter',saturn:'Saturn'};
+    const b=m[n]; if(!b)return 0;
+    try{const e=ae.Geocentric(day,ae[b],obs);return(e.eclipticLongitude*180/Math.PI+360)%360}catch(e){return 0}
+  }
+  const sunL=aeP('sun'),moonL=aeP('moon'),merL=aeP('mercury'),venL=aeP('venus'),marL=aeP('mars'),jupL=aeP('jupiter'),satL=aeP('saturn');
 
-  /* ---- R3: Zodiac ---- */
-  const ZS = "♈♉♊♋♌♍♎♏♐♑♒♓".split('');
-  const ZN = "Ari Tau Gem Can Leo Vir Lib Sco Sag Cap Aqu Pis".split('');
-  function sng(d){ return {i:Math.floor(d/30)%12, deg:+(d%30).toFixed(2), s:ZS[Math.floor(d/30)%12], n:ZN[Math.floor(d/30)%12]}; }
-  const RB = [
-    {n:"☉",lng:sunLng,c:'#ffd580'},{n:"☽",lng:moonLng,c:'#c8d8ff'},
-    {n:"☿",lng:mercLng,c:'#a8b8cc'},{n:"♀",lng:venLng,c:'#ffb8cc'},
-    {n:"♂",lng:marsLng,c:'#ff8080'},{n:"♃",lng:jupLng,c:'#ffe8a0'},
-    {n:"♄",lng:satLng,c:'#8899cc'}
-  ].map(b=>{ const c=sng(((b.lng%360)+360)%360); return {...b,...c}; });
+  // R1: Celtic + Hebrew
+  const CT="Birch Rowan Ash Alder Willow Hawthorn Oak Holly Hazel Vine Ivy Reed Elder".split(' ');
+  const yd=Math.floor((now-new Date(now.getFullYear(),0,1))/864e5);
+  const cdy=(yd+3)%365, ci=Math.floor(cdy/28), cd=(cdy%28)+1;
+  let rh="",ha=0.5,hf=0;
+  try{
+    const f=new Intl.DateTimeFormat('en-US',{calendar:'hebrew',year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false});
+    rh=f.format(now).split(',')[0].trim();
+    const m=rh.match(/(\d+)(?:st|nd|rd|th)?\s*,\s*(\d{4})/);
+    if(m){hf=Math.max(0,Math.min(1,(parseFloat(m[1])-1)/29));const lh=(now.getHours()+now.getMinutes()/60+now.getSeconds()/3600)%24;ha=0.5+0.5*Math.cos((lh-12)/12*Math.PI)}
+  }catch(e){rh="Hebrew ≈ "+now.getFullYear()}
+  const R1v="Celtic N"+(ci+1)+"·"+cd+" ("+CT[ci%13]+")";
 
-  /* ---- R4: Moon + Nakshatra ---- */
-  const msa = ((moonLng - sunLng)%360+360)%360;
-  const PN = ["New","Wax Crescent","First Quarter","Wax Gibbous","Full","Wan Gibbous","Last Quarter","Wan Crescent"];
-  const pi = Math.floor(msa/360*8+0.5)%8;
-  const illum = (1-Math.cos(msa*DEG*2))/2;
-  const NK = "Aśvinī Bharaṇī Kṛttikā Rohiṇī Mṛgaśīrā Ārdrā Punarvasu Puṣya Āśleṣā Maghā Pūrva Phalgunī Uttara Phalgunī Hasta Citrā Svāti Viśākhā Anūrādhā Jyeṣṭhā Mūla Pūrvāṣāḍhā Uttarāṣāḍhā Abhijit Śravaṇa Dhaniṣṭhā Shatabhishā Pūrva Bhādrapadā Uttara Bhādrapadā Revatī".split(' ');
-  const ni = Math.floor((((moonLng%360)+360)%360) / (360/27)) % 27;
+  // R2: Chinese + Islamic
+  const S="甲乙丙丁戊己庚辛壬癸".split(''),B="子丑寅卯辰巳午未申酉戌亥".split(''),A="Rat Ox Tiger Rabbit Dragon Snake Horse Goat Monkey Rooster Dog Pig".split(' ');
+  const CNY=Date.UTC(2024,1,10),i60=((Math.floor((unix-CNY)/864e5)%60)+60)%60;
+  const R2cn=S[i60%10]+B[i60%12]+" "+A[i60%12]+"年";
+  const R2is="ISL "+(Math.floor((unix/864e5+2440587.5-1948439.5)/354.36667)+1);
 
-  /* ---- R5: Planetary hr + I Ching ---- */
-  let pr="☉", pi2=0;
-  try {
-    const ris = AstronomyEngine.SearchRiseSet(day, AstroBody.Sun, true, obs);
-    if(ris && ris.length){
-      const sr = ris[0].time.date.getTime();
-      const ss = ris.length>1 ? ris[1].time.date.getTime() : sr+432e5;
-      let start=sr, dur=Math.max(1,(ss-sr)/12);
-      if(hr*3600*1e3 >= ss){ start=ss; dur=Math.max(1,(sr+864e5-ss)/12); }
-      pi2 = Math.max(0, Math.floor((hr*3600*1e3 - start)/dur) % 7);
-      pr = ["☉","♀","☿","☽","♄","♃","♂"][pi2];
+  // R3: Zodiac
+  const ZS="♈♉♊♋♌♍♎♏♐♑♒♓".split(''),ZN="Ari Tau Gem Can Leo Vir Lib Sco Sag Cap Aqu Pis".split('');
+  function sn(d){return{i:Math.floor(d/30)%12,deg:+(d%30).toFixed(2),s:ZS[Math.floor(d/30)%12],n:ZN[Math.floor(d/30)%12]}}
+  const RB=[
+    {n:"☉",lng:sunL,c:'#ffd580'},{n:"☽",lng:moonL,c:'#c8d8ff'},
+    {n:"☿",lng:merL,c:'#a8b8cc'},{n:"♀",lng:venL,c:'#ffb8cc'},{n:"♂",lng:marL,c:'#ff8080'},
+    {n:"♃",lng:jupL,c:'#ffe8a0'},{n:"♄",lng:satL,c:'#8899cc'}
+  ].map(b=>{const c=sn(((b.lng%360)+360)%360);return{...b,...c}});
+
+  // R4: Moon + Nakshatra
+  const msa=((moonL-sunL)%360+360)%360;
+  const PN=["New","Wax Crescent","First Quarter","Wax Gibbous","Full","Wan Gibbous","Last Quarter","Wan Crescent"];
+  const pi=Math.floor(msa/360*8+0.5)%8;
+  const illum=(1-Math.cos(msa*DEG*2))/2;
+  const NK="Aśvinī Bharaṇī Kṛttikā Rohiṇī Mṛgaśīrā Ārdrā Punarvasu Puṣya Āśleṣā Maghā Pūrva Phalgunī Uttara Phalgunī Hasta Citrā Svāti Viśākhā Anūrādhā Jyeṣṭhā Mūla Pūrvāṣāḍhā Uttarāṣāḍhā Abhijit Śravaṇa Dhaniṣṭhā Shatabhishā Pūrva Bhādrapadā Uttara Bhādrapadā Revatī".split(' ');
+  const ni=Math.floor((((moonL%360)+360)%360)/(360/27))%27;
+
+  // R5: Planetary hour + I Ching
+  let pr="☉",pi2=0;
+  try{
+    const ris=AstronomyEngine.SearchRiseSet(day,AstroBody.Sun,true,obs);
+    if(ris&&ris.length){
+      const sr=ris[0].time.date.getTime();
+      const ss=ris.length>1?ris[1].time.date.getTime():sr+432e5;
+      let st=sr,dur=Math.max(1,(ss-sr)/12);
+      if(hr*3600*1e3>=ss){st=ss;dur=Math.max(1,(sr+864e5-ss)/12)}
+      pi2=Math.max(0,Math.floor((hr*3600*1e3-st)/dur)%7);
+      pr=["☉","♀","☿","☽","♄","♃","♂"][pi2];
     }
-  } catch(e){}
-  const IC = [
-    "The Creative","The Receptive","Difficulty at Beginning","Youthful Folly",
-    "Waiting","Conflict","The Army","Union","Taming","Peace","Standstill","Fellowship",
-    "Possession in Great Measure","Modesty","Enthusiasm","Pursuit","Following","Decay","Approach","Contemplation","Biting Through","Grace",
-    "Splitting Apart","Return","Innocence","Great Taming","Mouth Corners","Great Exceeding","Water","Fire",
-    "Influence","Duration","Retreat","Power","Progress","Darkening","Family","Opposition","Obstruction","Deliverance",
-    "Decrease","Increase","Breakthrough","Coming to Meet","Gathering Together","Welling","Arising","Nourishment","The Taming Power",
-    "Pull Back","Exhaustion","The Clinging","Fire over Water","Peace","Standstill","Dragon","The Great","Yü","The Gentle",
-    "Dispersion","Limitation","Inner Truth","Small Taming","After Completion","Before Completion"
-  ];
-  const hi = Math.floor(sec*864/6.5)%64;
+  }catch(e){}
+  const IC=["The Creative","The Receptive","Difficulty at Beginning","Youthful Folly","Waiting","Conflict","The Army","Union","Taming","Peace","Standstill","Fellowship","Possession in Great Measure","Modesty","Enthusiasm","Pursuit","Following","Decay","Approach","Contemplation","Biting Through","Grace","Splitting Apart","Return","Innocence","Great Taming","Mouth Corners","Great Exceeding","Water","Fire","Influence","Duration","Retreat","Power","Progress","Darkening","Family","Opposition","Obstruction","Deliverance","Decrease","Increase","Breakthrough","Coming to Meet","Gathering Together","Welling","Arising","Nourishment","The Taming Power","Pull Back","Exhaustion","The Clinging","Fire over Water","Peace","Standstill","Dragon","The Great","Yü","The Gentle","Dispersion","Limitation","Inner Truth","Small Taming","After Completion","Before Completion"];
+  const hi=Math.floor(sec*864/6.5)%64;
 
-  /* ---- R6: Sephiroth ---- */
+  // R6: Sephiroth
   const SEPH=["Malkuth","Yesod","Netzach","Hod","Tiferet","Geburah","Chesed","Binah","Chokmah","Keter"];
-  const SC =["#557766","#2e5077","#ff8c00","#aa7316","#c9324c","#9c2222","#2244aa","#223399","#3311aa","#ffffff"];
-  const si = Math.abs(Math.floor(hr*10)) % 6;
+  const SC=["#557766","#2e5077","#ff8c00","#aa7316","#c9324c","#9c2222","#2244aa","#223399","#3311aa","#ffffff"];
+  const si=Math.abs(Math.floor(hr*10))%10;
 
-  /* ---- R7: Flower of Life ---- */
-  const f7 = sec*TAU/7;
+  // R7: Flower of Life
+  const f7=sec*TAU/7;
 
-  /* ---- R9: Muqatta'at ---- */
+  // R8: sweep
+  const sa=sec*6*DEG;
+
+  // R9: Muqatta'at
   const MQ=[
-    {l:"ا",lat:"ALM",txt:"Alif Lam Mim"},{l:"ق",lat:"QAS",txt:"Qaf Ha 'Ayn Sad"},
-    {l:"ط",lat:"QAF",txt:"Ta Ha"},{l:"ح",lat:"HHA",txt:"Ha Mim"},
-    {l:"ي",lat:"YS",txt:"Ya Sin"},{l:"ت",lat:"TT",txt:"Ta Sin Mim"},
-    {l:"س",lat:"SIN",txt:"Sad"},{l:"ق",lat:"QYF",txt:"Qaf"},
+    {l:"ا",lat:"ALM",txt:"Alif Lam Mim"},{l:"ق",lat:"QAF",txt:"Ta Ha"},
+    {l:"ط",lat:"HHA",txt:"Ha Mim"},{l:"ي",lat:"YS",txt:"Ya Sin"},
+    {l:"ت",lat:"TT",txt:"Ta Sin Mim"},{l:"س",lat:"SIN",txt:"Sad"},
     {l:"ك",lat:"QR",txt:"Kaf Ha Ya 'Ayn Sad"},{l:"ف",lat:"KF",txt:"KaFaR"},
     {l:"ه",lat:"HH",txt:"Ha Mim 'Ayn Sin Qaf"},{l:"ع",lat:"AYN",txt:"'Ayn Sin Qaf"},
-    {l:"غ",lat:"GHN",txt:"Ghain"},{l:"ث",lat:"TH",txt:"Throne verse"}
+    {l:"غ",lat:"GHN",txt:"Ghain"},{l:"ث",lat:"QAS",txt:"Qaf Ha 'Ayn Sad"},
+    {l:"ن",lat:"NUN",txt:"Nun"},{l:"ص",lat:"SAD",txt:"Sad"}
   ];
-  const ri = Math.floor(((min + sec/60) / (24*60/14) * 14) % 14);
+  const ri=Math.floor(((min+sec/60)/(24*60/14)*14)%14);
 
-  /* ---- R8: sweep ---- */
-  const sa = sec*6*DEG;
-
-  return {
+  return{
     R0:{v:now.toISOString().slice(0,19)+'Z'},
     R1:{v:R1v,hebrew:rh,ha,hf},
-    R2:{cn:R2cn,islamic:R2islamic},
+    R2:{cn:R2cn,islamic:R2is},
     R3:{bodies:RB},
     R4:{phase:PN[pi],illum,nak:NK[ni]},
     R5:{ruler:pr,iching:IC[hi],pi:pi2},
-    R6:{seph:SEPH[si],i:si},
+    R6:{seph:SEPH[si%10],i:si%10},
     R7:{phase:f7},
     R8:{sweep:sa},
     R9:{idx:ri,muq:MQ[ri]},
@@ -311,274 +249,278 @@ function computeRings(now){
 }
 
 /* =========================================================
-   SCREEN HELPERS
+   RENDER
    ========================================================= */
-function onScreen(sx,sy){ return sx>-80 && sx<W+80 && sy>-80 && sy<H+80; }
-function sf(px){ return Math.max(7, px / camZoom) + 'px "SF Mono",monospace'; }
+function draw(now,R){
+  $.setTransform(dpr*camZ,0,0,dpr*camZ,(cx+camX)*dpr,(cy+camY)*dpr);
+  $.clearRect(-(W/2+camX)/camZ-10,-(H/2+camY)/camZ-10,W/camZ+20,H/camZ+20);
 
-/* =========================================================
-   DRAW: Ring
-   ========================================================= */
-function rbR(r){
-  const r0 = RING_R[r]*Rmax, r1=(RING_R[r]+0.038)*Rmax;
-  ctx.strokeStyle = RING_C[r] || '#445';
-  ctx.lineWidth = 0.8; ctx.globalAlpha = 0.22;
-  ctx.beginPath(); ctx.arc(0,0,(r0+r1)/2,0,TAU); ctx.stroke();
-}
-function rbL(r, text, col, alpha){
-  if(!showLabels && focusRing!==r) return;
-  const r0 = RING_R[r]*Rmax;
-  ctx.globalAlpha = (focusRing===-1||focusRing===r)? (alpha||0.9) : 0.15;
-  ctx.fillStyle = col||'#b8c4e0';
-  ctx.font = sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-  const sx = wsx(0), sy = wsy(-r0);
-  if(onScreen(sx,sy)) ctx.fillText(text, sx, sy);
-}
+  // Haze
+  const hz=$.createRadialGradient(0,0,0,0,0,Rmax);
+  hz.addColorStop(0,'rgba(20,30,70,0.20)');hz.addColorStop(0.06,'rgba(25,35,85,0.12)');
+  hz.addColorStop(0.5,'rgba(10,15,40,0.05)');hz.addColorStop(1,'rgba(0,0,0,0)');
+  $.fillStyle=hz;$.globalAlpha=1;$.beginPath();$.arc(0,0,Rmax,0,TAU);$.fill();
 
-/* =========================================================
-   DRAW: Main
-   ========================================================= */
-function drawCoreGUI(now, R){
-  // Camera in world space: 0,0 = center, Rmax = world space
-  ctx.setTransform(dpr*camZoom, 0, 0, dpr*camZoom, (cx+camX)*dpr, (cy+camY)*dpr);
-  ctx.clearRect(-(W/2+camX)/camZoom-5, -(H/2+camY)/camZoom-5, W/camZoom+10, H/camZoom+10);
+  // Heartbeat
+  const bt=1+0.05*Math.sin(R.sec*TAU*0.5);
+  const pr=Math.max(1,(0.012+0.004*Math.sin(R.sec*TAU*0.12))*Math.min(W,H));
+  const pg=$.createRadialGradient(0,0,0,0,0,pr/camZ);
+  pg.addColorStop(0,'rgba(140,170,220,0.85)');pg.addColorStop(0.35,'rgba(100,140,210,0.45)');
+  pg.addColorStop(0.8,'rgba(60,90,160,0.08)');pg.addColorStop(1,'rgba(0,0,0,0)');
+  $.fillStyle=pg;$.globalAlpha=0.85*bt;$.beginPath();$.arc(0,0,pr/camZ,0,TAU);$.fill();
+  $.globalAlpha=1;
 
-  // ---- haze ----
-  const haze = ctx.createRadialGradient(0,0,0,0,0,Rmax);
-  haze.addColorStop(0,'rgba(20,30,70,0.20)');
-  haze.addColorStop(0.06,'rgba(25,35,85,0.12)');
-  haze.addColorStop(0.5,'rgba(10,15,40,0.05)');
-  haze.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=haze; ctx.globalAlpha=1;
-  ctx.beginPath(); ctx.arc(0,0,Rmax,0,TAU); ctx.fill();
+  // Ring backgrounds (all 10)
+  for(let i=0;i<10;i++) rbRing(i);
 
-  // ---- heartbeat ----
-  const beat = 1 + 0.05*Math.sin(R.sec*TAU*0.5);
-  const pr = Math.max(1,(0.012 + 0.004*Math.sin(R.sec*TAU*0.12)) * Math.min(W,H));
-  const pg = ctx.createRadialGradient(0,0,0,0,0,pr/camZoom);
-  pg.addColorStop(0,'rgba(140,170,220,0.85)');
-  pg.addColorStop(0.35,'rgba(100,140,210,0.45)');
-  pg.addColorStop(0.8,'rgba(60,90,160,0.08)');
-  pg.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=pg; ctx.globalAlpha=0.85*beat;
-  ctx.beginPath(); ctx.arc(0,0,pr/camZoom,0,TAU); ctx.fill();
-
-  /* ---- Ring backgrounds ---- */
-  rbR(0);
+  // R9 inner muqatta'at ring (drawn before outer tick ring so ticks stay on top)
   {
-    const r0=0.098, g=0.038;
+    const r0=RR[9], g=RG;
     const mid=(r0+g/2)*Rmax;
-    ctx.strokeStyle='#9ab4d8'; ctx.lineWidth=2.8;
-    ctx.globalAlpha=0.85*(0.35+0.65*R.R1.ha);
-    const a0=(R.R1.hf*TAU - 0.5*0.18*TAU) - 0.5*TAU;
-    ctx.beginPath(); ctx.arc(0,0,mid,a0,a0+0.18*TAU); ctx.stroke();
-    ctx.globalAlpha=0.08; ctx.lineWidth=g*Rmax*0.6;
-    ctx.beginPath(); ctx.arc(0,0,mid,a0,a0+0.18*TAU); ctx.stroke();
+    // ring stroke
+    $.strokeStyle='#a89c6c';$.lineWidth=0.8;$.globalAlpha=0.25;
+    $.beginPath();$.arc(0,0,mid,0,TAU);$.stroke();
+    // comet to active letter
+    const idx=R.R9.idx;
+    const ang=(idx/14)*TAU-0.5*TAU;
+    const rr=mid;
+    const tx=Math.cos(ang)*rr,ty=Math.sin(ang)*rr;
+    $.strokeStyle='#a89c6c';$.globalAlpha=0.45;$.lineWidth=1;
+    $.beginPath();$.moveTo(0,0);$.lineTo(tx,ty);$.stroke();
+    // glow
+    $.fillStyle='#ffe8b0';$.globalAlpha=0.9;
+    $.beginPath();$.arc(tx,ty,3.5/camZ,0,TAU);$.fill();
   }
-  rbR(1);
-  rbR(2);
-  rbR(3);
-  rbR(4);
-  rbR(5);
-  rbR(6);
-  rbR(7);
-  rbR(8);
-  {
-    const r0=0.428, g=0.038;
-    ctx.strokeStyle='#a89c6c'; ctx.lineWidth=0.8; ctx.globalAlpha=0.25;
-    ctx.beginPath(); ctx.arc(0,0,(r0+g/2)*Rmax,0,TAU); ctx.stroke();
-    // active letter comet
-    const idx = R.R9.idx;
-    const ang = (idx/14)*TAU - 0.5*TAU;
-    const rr = r0*Rmax + g*Rmax*0.5;
-    const tx = Math.cos(ang)*rr, ty = Math.sin(ang)*rr;
-    ctx.strokeStyle='#a89c6c'; ctx.globalAlpha=0.45;
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(tx,ty); ctx.stroke();
-    // glowing dot at active
-    ctx.fillStyle='#ffe8b0'; ctx.globalAlpha=0.9;
-    ctx.beginPath(); ctx.arc(tx,ty,4/camZoom,0,TAU); ctx.fill();
-  }
-  rbR(9);
 
-  /* ---- Labels ---- */
-  rbL(0,"UTC · "+R.R0.v.slice(0,19),'#b8c4e0',0.95);
+  // R0: UTC
   {
-    const r0=0.098;
-    ctx.globalAlpha=(focusRing===-1||focusRing===1)?0.9:0.15;
-    ctx.fillStyle='#a0b8d0';
-    ctx.font = sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    const sx=wsx(0), sy=wsy(-r0*Rmax);
-    if(onScreen(sx,sy)){
-      ctx.fillText("CELTIC / HEBREW / ACTIVITY", sx, sy-6);
-      ctx.save(); ctx.globalAlpha*=0.55; ctx.font=sf(8);
-      ctx.fillText("◐ "+R.R1.ha.toFixed(2), sx, sy-0); ctx.restore();
-      ctx.fillText(R.R1.v.slice(0,26), sx, sy+6);
-      ctx.font=sf(9); ctx.fillText(R.R1.hebrew.slice(0,22), sx, sy+17);
+    const r0=RR[0];
+    if(showLabels||focusRing===0){
+      $.globalAlpha=(focusRing===-1||focusRing===0)?0.95:0.2;
+      $.fillStyle='#b8c4e0';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      $.fillText("UTC",wsx(0),wsy(-r0*Rmax)-10);
+      $.font=fs(10);$.fillText(R.R0.v.slice(0,19),wsx(0),wsy(-r0*Rmax)+4);
     }
   }
+
+  // R1: Celtic/Hebrew/Activity
   {
-    ctx.globalAlpha=(focusRing===-1||focusRing===2)?0.9:0.15;
-    ctx.fillStyle='#a8c8c0';
-    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    const sx=wsx(0), sy=wsy(-0.166*Rmax);
-    ctx.fillText("CHINESE / ISLAMIC", sx, sy-7);
-    ctx.font='11px sans-serif';
-    ctx.fillText(R.R2.cn, sx, sy+5);
-    ctx.font=sf(9);
-    ctx.fillText(R.R2.islamic, sx, sy+17);
+    const r0=RR[1],g=RG,mid=(r0+g/2)*Rmax;
+    // activity arc
+    const arcLen=0.18*TAU;
+    const a0=(R.R1.hf*TAU-0.5*arcLen)-0.5*TAU;
+    $.strokeStyle='#9ab4d8';$.lineWidth=2.8;
+    $.globalAlpha=0.85*(0.35+0.65*R.R1.ha);
+    $.beginPath();$.arc(0,0,mid,a0,a0+arcLen);$.stroke();
+    $.globalAlpha=0.08;$.lineWidth=g*Rmax*0.6;
+    $.beginPath();$.arc(0,0,mid,a0,a0+arcLen);$.stroke();
+    // labels
+    if(showLabels||focusRing===1){
+      $.globalAlpha=(focusRing===-1||focusRing===1)?0.9:0.15;
+      $.fillStyle='#a0b8d0';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      $.fillText("CELTIC / HEBREW / ACTIVITY",sx,sy-6);
+      $.save();$.globalAlpha*=0.55;$.font=fs(8);$.fillStyle='#aac';
+      $.fillText("◐ "+R.R1.ha.toFixed(2),sx,sy-0);$.restore();
+      $.fillText(R.R1.v.slice(0,26),sx,sy+6);
+      $.fillText(R.R1.hebrew.slice(0,22),sx,sy+17);
+    }
   }
+
+  // R2: Chinese/Islamic
   {
-    ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.9:0.15;
-    ctx.fillStyle='#a0c0c0';
-    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText("PLANETS", wsx(0), wsy(-0.244*Rmax)-8);
-    R.R3.bodies.forEach((b,i)=>{
-      const a = (i/7)*TAU - 0.5;
-      const px = Math.cos(a)*0.04*Rmax, py = Math.sin(a)*0.04*Rmax;
-      ctx.fillStyle = b.c || '#abc';
-      ctx.fillText(b.n+b.s, wsx(px), wsy(py)+3);
-    });
-    // sign names at outer zodiac ring
+    const r0=RR[2];
+    if(showLabels||focusRing===2){
+      $.globalAlpha=(focusRing===-1||focusRing===2)?0.9:0.15;
+      $.fillStyle='#a8c8c0';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      $.fillText("CHINESE / ISLAMIC",sx,sy-7);
+      $.font='11px sans-serif';$.fillText(R.R2.cn,sx,sy+5);
+      $.font=fs(9);$.fillText(R.R2.islamic,sx,sy+17);
+    }
+  }
+
+  // R3: Zodiac
+  {
+    const r0=RR[3],g=RG;
+    $.strokeStyle='#445';$.lineWidth=0.5;$.globalAlpha=0.25;
+    $.beginPath();$.arc(0,0,(r0+g/2)*Rmax,0,TAU);$.stroke();
+    $.globalAlpha=1;
     for(let i=0;i<12;i++){
-      const a = i*30*DEG - 90*DEG;
-      const r = 0.264*Rmax;
-      const xl = wsx(Math.cos(a)*r + 0.008*Rmax*Math.cos(a+0.01));
-      const yl = wsy(Math.sin(a)*r + 0.008*Rmax*Math.sin(a+0.01));
-      if(onScreen(xl,yl)){
-        ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.55:0.1;
-        ctx.fillStyle='#99a'; ctx.font=sf(9);
-        ctx.fillText(ZN[i], xl, yl);
+      const a=i*30*DEG-90*DEG;
+      const x1=Math.cos(a)*r0*Rmax,y1=Math.sin(a)*r0*Rmax;
+      const x2=Math.cos(a)*(r0+g)*Rmax,y2=Math.sin(a)*(r0+g)*Rmax;
+      $.beginPath();$.moveTo(x1,y1);$.lineTo(x2,y2);
+      $.strokeStyle=(i<RB.length)?(RB[i].c||'#556'):'#445';
+      $.lineWidth=1.2;$.globalAlpha=0.85;$.stroke();
+      // planet glyph at midring
+      const pm=Math.cos(a)*(r0+g*0.55)*Rmax, qm=Math.sin(a)*(r0+g*0.55)*Rmax;
+      if(showLabels&&(focusRing===3||focusRing===-1)&&i<RB.length){
+        $.save();$.fillStyle=RB[i].c||'#99b8d8';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+        $.fillText(RB[i].n,pm,qm);$.restore();
+      }
+      // sign name outer
+      const xl=Math.cos(a+0.015)*(r0+g+4)*Rmax,yl=Math.sin(a+0.015)*(r0+g+4)*Rmax;
+      if(showLabels&&(focusRing===3||focusRing===-1)&&onScr(wsx(xl),wsy(yl))){
+        $.globalAlpha=(focusRing===-1||focusRing===3)?0.55:0.1;
+        $.fillStyle='#99a';$.font=fs(9);$.textAlign='center';
+        $.fillText(ZN[i],wsx(xl),wsy(yl));
       }
     }
+    if(showLabels||focusRing===3){
+      $.globalAlpha=(focusRing===-1||focusRing===3)?0.95:0.15;
+      $.fillStyle='#a0c0c0';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      $.fillText("PLANETS",wsx(0),wsy(-r0*Rmax)-8);
+      R.R3.bodies.forEach((b,i)=>{
+        const a=(i/7)*TAU-0.5;const px=Math.cos(a)*0.04*Rmax,py=Math.sin(a)*0.04*Rmax;
+        $.fillStyle=b.c||'#abc';$.fillText(b.n+b.s,wsx(px),wsy(py)+3);
+      });
+    }
   }
+
+  // R4: Moon/Nakshatra
   {
-    const r0=0.324;
-    ctx.globalAlpha=(focusRing===-1||focusRing===4)?0.9:0.15;
-    ctx.fillStyle='#a8c8a0';
-    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    const sx=wsx(0), sy=wsy(-r0*Rmax);
-    ctx.fillText("MOON", sx, sy-6);
-    ctx.fillText(R.R4.phase + " ["+(R.R4.illum*100).toFixed(1)+"%]", sx, sy+5);
-    ctx.fillStyle='#90a888'; ctx.font=sf(9);
-    ctx.fillText("nak "+R.R4.nak, sx, sy+17);
+    const r0=RR[4],g=RG,mid=(r0+g/2)*Rmax;
+    const a=R.R4.phase?R.R4.phase:0;
+    // Wait: R.R4.phase is a string from PN array. I need the numeric phase.
+    // I'll compute numeric from illum
+    const numPhase = (() => {
+      const msa2 = ((moonL-sunL+360)%360);
+      return (msa2/360);
+    })();
+    const px2=Math.cos(numPhase*TAU)*mid,py2=Math.sin(numPhase*TAU)*mid;
+    $.fillStyle='#cfe';$.globalAlpha=0.9;
+    $.beginPath();$.arc(px2,py2,2.2,0,TAU);$.fill();
+    if(showLabels||focusRing===4){
+      $.globalAlpha=(focusRing===-1||focusRing===4)?0.9:0.15;
+      $.fillStyle='#a8c8a0';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      $.fillText("MOON",sx,sy-6);
+      $.fillText((R.R4.phase||'')+" ["+(R.R4.illum*100).toFixed(1)+"%]",sx,sy+5);
+      $.fillStyle='#90a888';$.fillText("nak "+R.R4.nak,sx,sy+17);
+    }
   }
+
+  // R5: Planetary Hour / I Ching
   {
-    const r0=0.500;
-    ctx.globalAlpha=(focusRing===-1||focusRing===5)?0.9:0.15;
-    ctx.fillStyle='#8ab';
-    ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    const sx=wsx(0), sy=wsy(-r0*Rmax);
-    ctx.fillText("PLANETARY HR · "+R.R5.ruler, sx, sy-6);
-    ctx.font=sf(9);
-    ctx.fillText("Hexagram "+(R.R5.iching||'').slice(0,18), sx, sy+5);
+    const r0=RR[5],g=RG,mid=(r0+g/2)*Rmax;
+    $.strokeStyle='#6b90d0';$.globalAlpha=0.22;$.lineWidth=1;
+    $.beginPath();$.arc(0,0,mid,0,TAU);$.stroke();
+    // ruler glow at sector
+    const ang2=(R.R5.pi/7)*TAU;
+    const px3=Math.cos(ang2)*mid,py3=Math.sin(ang2)*mid;
+    $.fillStyle='#6af';$.globalAlpha=0.85;
+    $.beginPath();$.arc(px3,py3,2.8,0,TAU);$.fill();
+    if(showLabels||focusRing===5){
+      $.globalAlpha=(focusRing===-1||focusRing===5)?0.9:0.15;
+      $.fillStyle='#8ab';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      $.fillText("PLANETARY HR · "+R.R5.ruler,sx,sy-6);
+      $.fillText("Hexagram "+(R.R5.iching||'').slice(0,18),sx,sy+5);
+    }
   }
+
+  // R6: Sephiroth
   {
-    const r0=0.580;
-    ctx.strokeStyle=SC[si]; ctx.lineWidth=1.2; ctx.globalAlpha=0.35;
-    ctx.beginPath(); ctx.arc(0,0,(RING_R[6]*Rmax),0,TAU); ctx.stroke();
-    const a0=(R.R6.i/6)*TAU;
-    ctx.strokeStyle=SC[si]; ctx.globalAlpha=0.70; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.arc(0,0,(RING_R[6]+0.038)*Rmax,a0,a0+TAU/6); ctx.stroke();
-    ctx.globalAlpha=(focusRing===-1||focusRing===6)?0.9:0.15;
-    ctx.fillStyle=SC[si]; ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText("SEPHIROTH", wsx(0), wsy(-r0*Rmax)-6);
-    ctx.font='bold ' + sf(10);
-    ctx.fillText(R.R6.seph, wsx(0), wsy(-r0*Rmax)+5);
+    const r0=RR[6],i=R.R6.i;
+    $.strokeStyle=SC[i%10];$.globalAlpha=0.35;$.lineWidth=1.2;
+    $.beginPath();$.arc(0,0,RR[6]*Rmax,0,TAU);$.stroke();
+    const a0=(i/6)*TAU;
+    $.strokeStyle=SC[i%10];$.globalAlpha=0.70;$.lineWidth=3;
+    $.beginPath();$.arc(0,0,(RR[6]+RG)*Rmax,a0,a0+TAU/6);$.stroke();
+    if(showLabels||focusRing===6){
+      $.globalAlpha=(focusRing===-1||focusRing===6)?0.9:0.15;
+      $.fillStyle=SC[i%10];$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      $.fillText("SEPHIROTH",sx,sy-6);
+      $.font='bold '+fs(10);$.fillText(R.R6.seph,sx,sy+5);
+    }
   }
+
+  // R7: Flower of Life
   {
-    const r0=0.666;
-    ctx.globalAlpha=0.18; ctx.strokeStyle='#6e7'; ctx.lineWidth=0.8;
-    const mid = (r0+0.038/2)*Rmax;
+    const r0=RR[7],mid=(r0+RG/2)*Rmax;
+    $.globalAlpha=0.18;$.strokeStyle='#6e7';$.lineWidth=0.8;
     for(let k=0;k<7;k++){
-      const a = R.R7.phase + k*TAU/7;
-      const dc = mid*0.5, px=Math.cos(a)*dc, py=Math.sin(a)*dc;
-      ctx.beginPath(); ctx.arc(px,py,mid*0.28,0,TAU); ctx.stroke();
+      const a=R.R7.phase+k*TAU/7,dc=mid*0.5;
+      $.beginPath();$.arc(Math.cos(a)*dc,Math.sin(a)*dc,mid*0.28,0,TAU);$.stroke();
     }
-    ctx.lineWidth=1; ctx.globalAlpha=0.22;
-    ctx.beginPath(); ctx.arc(0,0,mid*0.28,0,TAU); ctx.stroke();
+    $.lineWidth=1;$.globalAlpha=0.22;
+    $.beginPath();$.arc(0,0,mid*0.28,0,TAU);$.stroke();
     if(showLabels||focusRing===7){
-      ctx.globalAlpha=(focusRing===-1||focusRing===7)?0.75:0.12;
-      ctx.fillStyle='#6e7'; ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText("FLOWER · Π", wsx(0), wsy(-r0*Rmax)-4);
+      $.globalAlpha=(focusRing===-1||focusRing===7)?0.75:0.12;
+      $.fillStyle='#6e7';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+      $.fillText("FLOWER · Π",wsx(0),wsy(-r0*Rmax)-4);
     }
   }
+
+  // R8: Outer ticks + hands
   {
-    // Outer ticks
-    const r0=(RING_R[8]-0.012)*Rmax, r1=RING_R[8]*Rmax;
-    ctx.strokeStyle='#3d4a6b'; ctx.lineWidth=0.5;
+    const r0=(RR[8]-0.012)*Rmax,r1=RR[8]*Rmax;
+    $.strokeStyle='#3d4a6b';$.lineWidth=0.5;
     for(let i=0;i<360;i++){
-      const a = i*DEG - 90*DEG;
-      const major=(i%30===0), minor=(i%5===0);
-      const l = major?6:minor?3.5:1.2;
-      if(!major && !minor && i%1!==0) continue;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a)*(r1-l), Math.sin(a)*(r1-l));
-      ctx.lineTo(Math.cos(a)*r1, Math.sin(a)*r1);
-      if(major){ ctx.globalAlpha=0.6; ctx.lineWidth=0.8; }
-      else if(minor){ ctx.globalAlpha=0.35; ctx.lineWidth=0.6; }
-      else{ ctx.globalAlpha=0.14; ctx.lineWidth=0.4; }
-      ctx.stroke();
+      const a=i*DEG-90*DEG;
+      const major=i%30===0,minor=i%5===0;
+      const l=major?6:minor?3.5:1.2;
+      $.beginPath();$.moveTo(Math.cos(a)*(r1-l),Math.sin(a)*(r1-l));
+      $.lineTo(Math.cos(a)*r1,Math.sin(a)*r1);
+      $.globalAlpha=major?0.6:minor?0.35:0.14;
+      $.lineWidth=major?0.8:minor?0.6:0.4;$.stroke();
     }
-    // hands
-    ctx.save(); ctx.globalAlpha=0.9;
-    const swR = RING_R[8]*Rmax;
-    ctx.strokeStyle='#7b9fe0'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(0,0);
-    ctx.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR, Math.sin(R.R8.sweep-90*DEG)*swR); ctx.stroke();
-    // minute
-    const mm = RING_R[7]-0.02;
-    ctx.strokeStyle='#b8c4e0'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.moveTo(0,0);
-    ctx.lineTo(Math.cos(R.min*6*DEG-90*DEG)*mm*Rmax, Math.sin(R.min*6*DEG-90*DEG)*mm*Rmax); ctx.stroke();
-    // hour
-    const hh = RING_R[7]-0.05;
-    ctx.strokeStyle='#dde'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(0,0);
-    ctx.lineTo(Math.cos(R.hr*30*DEG-90*DEG)*hh*Rmax, Math.sin(R.hr*30*DEG-90*DEG)*hh*Rmax); ctx.stroke();
-    ctx.fillStyle='#7b9fe0'; ctx.globalAlpha=0.9;
-    ctx.beginPath(); ctx.arc(0,0,2.2/camZoom,0,TAU); ctx.fill();
-    ctx.restore();
+    $.save();$.globalAlpha=0.9;
+    const swR=RR[8]*Rmax;
+    $.strokeStyle='#7b9fe0';$.lineWidth=2;
+    $.beginPath();$.moveTo(0,0);
+    $.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR,Math.sin(R.R8.sweep-90*DEG)*swR);$.stroke();
+    const mm=RR[7]-0.02;
+    $.strokeStyle='#b8c4e0';$.lineWidth=2.5;
+    $.beginPath();$.moveTo(0,0);
+    $.lineTo(Math.cos(R.min*6*DEG-90*DEG)*mm*Rmax,Math.sin(R.min*6*DEG-90*DEG)*mm*Rmax);$.stroke();
+    const hh=RR[7]-0.05;
+    $.strokeStyle='#dde';$.lineWidth=3;
+    $.beginPath();$.moveTo(0,0);
+    $.lineTo(Math.cos(R.hr*30*DEG-90*DEG)*hh*Rmax,Math.sin(R.hr*30*DEG-90*DEG)*hh*Rmax);$.stroke();
+    $.fillStyle='#7b9fe0';$.globalAlpha=0.9;
+    $.beginPath();$.arc(0,0,2.2/camZ,0,TAU);$.fill();
+    $.restore();
   }
 
-  // ---- R9 Label ----
-  if(showLabels || focusRing===9){
-    const r0=0.428*Rmax;
-    ctx.globalAlpha=(focusRing===-1||focusRing===9)?0.85:0.12;
-    ctx.fillStyle='#c9a860'; ctx.font=sf(9); ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText("MUQATTA'AT", wsx(0), wsy(-r0+RING_C[9]*0 + 6)); // simple label
-    const mq = R.R9.muq;
-    ctx.font=sf(9); ctx.fillStyle='#887'; ctx.globalAlpha*=0.6;
-    ctx.fillText((mq?mq.lat:'')+' · '+(mq?mq.txt.slice(0,12):''), wsx(0), wsy(-r0+18));
+  // R9 label
+  if(showLabels||focusRing===9){
+    const r0=RR[9];
+    $.globalAlpha=(focusRing===-1||focusRing===9)?0.85:0.12;
+    $.fillStyle='#c9a860';$.font=fs(9);$.textAlign='center';$.textBaseline='middle';
+    $.fillText("MUQATTA'AT",wsx(0),wsy(-r0*Rmax)-6);
+    const mq=R.R9.muq;
+    if(mq){$.font=fs(9);$.fillStyle='#887';$.globalAlpha*=0.6;
+      $.fillText(mq.lat+' · '+mq.txt.slice(0,12),wsx(0),wsy(-r0*Rmax)+14)}
   }
 
-  // ---- focal ring highlight ----
-  if(focusRing >= 0){
-    const rf = RING_R[focusRing];
-    ctx.save();
-    ctx.strokeStyle='rgba(123,159,224,0.6)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.arc(0,0,rf*Rmax,0,TAU); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0,0,(rf+0.038)*Rmax,0,TAU); ctx.stroke();
-    ctx.restore();
+  // Focal ring highlight
+  if(focusRing>=0){
+    const rf=RR[focusRing];
+    $.save();$.strokeStyle='rgba(123,159,224,0.6)';$.lineWidth=1;
+    $.beginPath();$.arc(0,0,rf*Rmax,0,TAU);$.stroke();
+    $.beginPath();$.arc(0,0,(rf+RG)*Rmax,0,TAU);$.stroke();
+    $.restore();
   }
 }
 
 /* =========================================================
    INFO PANEL
    ========================================================= */
-function updateInfo(R, now){
-  const el = document.getElementById('info');
-  const ln = (a,b)=>`<span class="val">${a}</span><span class="sep">·</span>${b}`;
-  el.innerHTML = [
-    ln('UTC', R.R0.v),
-    ln('CELTIC', R.R1.v.slice(0,26)),
-    ln('HEBREW', R.R1.hebrew.slice(0,22)),
-    ln('CHINESE', R.R2.cn),
-    ln('ISL', R.R2.islamic),
-    ln('MOON', R.R4.phase+' '+R.R4.nak),
-    ln('HR', R.R5.ruler+' '+R.R5.iching.slice(0,14)),
-    ln('SEPH', R.R6.seph),
-    ln('MUQ', (R.R9.muq?R.R9.muq.lat:'')+' · '+(R.R9.muq?R.R9.muq.txt.slice(0,12):'')),
-    ln('SEED', dailySeed ? dailySeed.seed : ''),
+function info(R){
+  const el=document.getElementById('info');
+  const ln=(a,b)=>`<span class="val">${a}</span><span class="sep">·</span>${b}`;
+  el.innerHTML=[
+    ln('UTC',R.R0.v),ln('CELTIC',R.R1.v.slice(0,22)),
+    ln('HEB',R.R1.hebrew.slice(0,20)),ln('CHINESE',R.R2.cn),
+    ln('ISL',R.R2.islamic),
+    ln('MOON',(R.R4.phase||'')+' '+R.R4.nak),
+    ln('HR',R.R5.ruler+' '+(R.R5.iching||'').slice(0,12)),
+    ln('SEPH',R.R6.seph),
+    ln('MUQ',(R.R9.muq?R.R9.muq.lat:'')+' · '+(R.R9.muq?R.R9.muq.txt.slice(0,10):'')),
+    ln('SEED',seed?seed.seed:'')
   ].map(s=>`<div>${s}</div>`).join('');
 }
 
@@ -586,41 +528,31 @@ function updateInfo(R, now){
    LOOP
    ========================================================= */
 function loop(){
-  const now = new Date();
-  const R = computeRings(now);
-  dailySeed = loadDailySeed(now, R);
-  drawCoreGUI(now, R);
-  updateInfo(R, now);
-  document.getElementById('seed').textContent =
-    "COHERENT · " + now.toISOString().slice(0,10) + " · " + dailySeed.seed;
-  const sec = Math.floor(now.getTime()/1000);
-  if(sec !== lastSec){ lastSec = sec; document.title = R.R0.v.slice(0,19) + ' · COSMIC CLOCK'; }
+  const now=new Date();
+  const R=compute(now);
+  seed=loadSeed(now,R);
+  draw(now,R);
+  info(R);
+  document.getElementById('seed').textContent="COHERENT · "+now.toISOString().slice(0,10)+" · "+seed.seed;
+  const s=Math.floor(now.getTime()/1000);
+  if(s!==lastSec){lastSec=s;document.title=R.R0.v.slice(0,19)+' · COSMIC CLOCK'}
   requestAnimationFrame(loop);
 }
 
 /* =========================================================
    KEYBOARD
    ========================================================= */
-window.addEventListener('keydown', e=>{
-  const k = e.key;
-  if(k==='h'||k==='H'){
-    showLabels=!showLabels;
-    document.getElementById('info').style.opacity = showLabels ? '1' : '0';
-  }
-  if(k==='f'||k==='F'){
-    if(document.fullscreenElement) document.exitFullscreen();
-    else document.body.requestFullscreen().catch(()=>{});
-  }
-  if(k>='1' && k<='9') focusRing = parseInt(k)-1;
-  if(k==='0' || k==='Escape') focusRing = -1;
-  if(k==='r' || k==='R'){ camX=0; camY=0; camZoom=1; }
-  if(k==='?'){
-    const h = document.getElementById('help');
-    h.style.display = h.style.display==='none' ? 'flex' : 'none';
-  }
-  if(k==='`') canvas.style.cursor = canvas.style.cursor==='none' ? 'grab' : 'none';
+window.addEventListener('keydown',e=>{
+  const k=e.key;
+  if(k==='h'||k==='H'){showLabels=!showLabels;document.getElementById('info').style.opacity=showLabels?'1':'0'}
+  if(k==='f'||k==='F'){if(document.fullscreenElement)document.exitFullscreen();else document.body.requestFullscreen().catch(()=>{})}
+  if(k>='1'&&k<='9')focusRing=parseInt(k)-1;
+  if(k==='0'||k==='Escape')focusRing=-1;
+  if(k==='r'||k==='R'){camX=0;camY=0;camZ=1}
+  if(k==='?'){const h=document.getElementById('help');h.style.display=h.style.display==='none'?'flex':'none'}
+  if(k==='`') C.style.cursor=C.style.cursor==='none'?'grab':'none';
 });
-document.getElementById('info').style.opacity = '1';
+document.getElementById('info').style.opacity='1';
 
 resize();
 loop();
