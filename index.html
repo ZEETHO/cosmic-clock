@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>COSMIC CLOCK v4</title>
+<title>COSMIC CLOCK v5</title>
 <style>
   :root{--bg:#05070f;--ink:#b8c4e0;--mute:#3d4a6b;--glow:#7b9fe0;--panel:#0a0f1f}
   *{margin:0;padding:0;box-sizing:border-box}
@@ -25,20 +25,24 @@
   #info .sep{color:var(--mute);opacity:.5}
   #help{position:fixed;bottom:0;left:0;right:0;background:var(--panel);
     border-top:1px solid rgba(123,159,224,.18);padding:4px 14px;font-size:10px;
-    color:var(--mute);gap:6px 18px;pointer-events:none;display:none}
+    color:var(--mute);gap:6px 18px;pointer-events:none;display:none;flex-wrap:wrap}
+  #share{position:fixed;top:30px;left:10px;font-size:9px;color:var(--mute);
+    background:var(--panel);border:1px solid rgba(123,159,224,.18);
+    padding:2px 7px;border-radius:4px;cursor:pointer}
 </style>
 </head>
 <body>
 <div id="seed">COHERENT · ——— · ————</div>
 <canvas id="C"></canvas>
-<div class="kbd">H labels · F full · ` drag · ⇧ zoom · R reset · ? help · T traces</div>
+<div class="kbd">H labels · F full · T traces · S share · R reset · 0-9 focus · ? help</div>
 <div id="info"></div>
 <div id="help"></div>
+<div id="share" onclick="doShare()">[ S ] SHARE SNAPSHOT</div>
 
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.9/astronomy.min.js"></script>
 <script>
 /* =========================================================
-   COSMIC CLOCK v4 — pluggable rings · traces · tzolkin
+   COSMIC CLOCK v5 — 13 rings · traces · share · modular
    ========================================================= */
 const C = document.getElementById('C');
 const $ = C.getContext('2d');
@@ -61,18 +65,27 @@ window.addEventListener('resize',resize);
    ==================== */
 function makeSeed(now,R){
   const d=now.toISOString().slice(0,10);
-  const src=d+'|'+(R.R5.iching||'')+'|'+(R.R5.ruler||'')+'|'+(R.R4.nak||'').slice(0,4)+'|'+(R.R6.seph||'')+'|'+(R.R10.tzolkin||'');
+  const src=[
+    d,
+    (R.R5&&R.R5.iching)||'',
+    (R.R5&&R.R5.ruler)||'',
+    (R.R4&&R.R4.nak||'').slice(0,4),
+    (R.R6&&R.R6.seph)||'',
+    (R.R10&&R.R10.tzolkin)||'',
+    (R.R11&&R.R11.hurufLetter)||'',
+    (R.R12&&R.R12.codon)||''
+  ].join('|');
   let h=0; for(let i=0;i<src.length;i++) h=((h<<5)-h+src.charCodeAt(i));
   const s=Math.abs(h|0).toString(16).toUpperCase().padStart(8,'0');
-  seed={date:d,seed:s,iching:R.R5.iching,ruler:R.R5.ruler,seph:R.R6.seph,nak:R.R4.nak,tzolkin:R.R10.tzolkin};
+  seed={date:d,seed:s,iching:(R.R5&&R.R5.iching)||'',ruler:(R.R5&&R.R5.ruler)||'',seph:(R.R6&&R.R6.seph)||'',
+    nak:(R.R4&&R.R4.nak||'').slice(0,4),tzolkin:(R.R10&&R.R10.tzolkin)||'',huruf:(R.R11&&R.R11.hurufLetter)||'',codon:(R.R12&&R.R12.codon)||''};
   try{localStorage.setItem('ccDaily',JSON.stringify(seed))}catch(e){}
   try{history.replaceState(null,'','#seed='+s)}catch(e){}
   return seed;
 }
 function loadSeed(now,R){
   try{const s=JSON.parse(localStorage.getItem('ccDaily'));if(s&&s.date===now.toISOString().slice(0,10))return s}catch(e){}
-  return makeSeed(now,R);
-}
+  return makeSeed(now,R);}
 
 /* ====================
    CAMERA
@@ -85,7 +98,6 @@ C.addEventListener('wheel',e=>{
   const d=e.deltaY>0?-0.06:0.06;
   const nz=Math.max(0.35,Math.min(5,camZ*(1+d)));
   const r=C.getBoundingClientRect();
-  const mx=e.clientX-r.left-cx,my=e.clientY-r.top-cy;
   const ratio=nz/camZ;
   camX=e.clientX-r.left-cx-ratio*(e.clientX-r.left-cx-camX);
   camY=e.clientY-r.top-cy-ratio*(e.clientY-r.top-cy-camY);
@@ -98,12 +110,12 @@ function onScr(sx,sy){return sx>-100&&sx<W+100&&sy>-100&&sy<H+100}
 function fs(px){return Math.max(7,px/camZ)+'px "SF Mono",monospace'}
 
 /* ====================
-   RING DEFINITIONS — pluggable
+   RING LAYOUT
    ==================== */
 const RG=0.038;
 
 /* ====================
-   RING DATA
+   COMPUTE
    ==================== */
 function compute(now){
   const unix=now.getTime();
@@ -134,7 +146,20 @@ function compute(now){
   }
   const sunL=aeP('sun'),moonL=aeP('moon'),merL=aeP('mercury'),venL=aeP('venus'),marL=aeP('mars'),jupL=aeP('jupiter'),satL=aeP('saturn');
 
-  // R1: Celtic
+  // Observer altitude/azimuth for sky grid
+  let raGrid=null,decGrid=null;
+  try{
+    if(ae && obs){
+      const jd=ae.JulianDay(day);
+      const eq=ae.Equator(day,ae.Sun,obs,ae.EQUINOX_J2000);
+      if(eq && eq.ra !== undefined){
+        raGrid=(eq.ra*180/Math.PI)%360;
+        decGrid=eq.dec*180/Math.PI;
+      }
+    }
+  }catch(e){raGrid=null;decGrid=0}
+
+  // R1: Celtic + Hebrew
   const CT="Birch Rowan Ash Alder Willow Hawthorn Oak Holly Hazel Vine Ivy Reed Elder".split(' ');
   const yd=Math.floor((now-new Date(now.getFullYear(),0,1))/864e5);
   const cdy=(yd+3)%365, ci=Math.floor(cdy/28), cd=(cdy%28)+1;
@@ -146,7 +171,7 @@ function compute(now){
     if(m){hf=Math.max(0,Math.min(1,(parseFloat(m[1])-1)/29));const lh=(now.getHours()+now.getMinutes()/60+now.getSeconds()/3600)%24;ha=0.5+0.5*Math.cos((lh-12)/12*Math.PI)}
   }catch(e){rh="Hebrew ≈ "+now.getFullYear()}
 
-  // R2: Chinese/Islamic
+  // R2: Chinese + Islamic
   const S="甲乙丙丁戊己庚辛壬癸".split(''),B="子丑寅卯辰巳午未申酉戌亥".split(''),A="Rat Ox Tiger Rabbit Dragon Snake Horse Goat Monkey Rooster Dog Pig".split(' ');
   const CNY=Date.UTC(2024,1,10),i60=((Math.floor((unix-CNY)/864e5)%60)+60)%60;
   const R2cn=S[i60%10]+B[i60%12]+" "+A[i60%12]+"年";
@@ -161,7 +186,7 @@ function compute(now){
     {n:"♃",lng:jupL,c:'#ffe8a0'},{n:"♄",lng:satL,c:'#8899cc'}
   ].map(b=>{const c=sn(((b.lng%360)+360)%360);return{...b,...c}});
 
-  // R4: Moon+Nakshatra
+  // R4: Moon + Nakshatra
   const msa=((moonL-sunL)%360+360)%360;
   const PN=["New","Wax Crescent","First Quarter","Wax Gibbous","Full","Wan Gibbous","Last Quarter","Wan Crescent"];
   const pi=Math.floor(msa/360*8+0.5)%8;
@@ -169,7 +194,7 @@ function compute(now){
   const NK="Aśvinī Bharaṇī Kṛttikā Rohiṇī Mṛgaśīrā Ārdrā Punarvasu Puṣya Āśleṣā Maghā Pūrva Phalgunī Uttara Phalgunī Hasta Citrā Svāti Viśākhā Anūrādhā Jyeṣṭhā Mūla Pūrvāṣāḍhā Uttarāṣāḍhā Abhijit Śravaṇa Dhaniṣṭhā Shatabhishā Pūrva Bhādrapadā Uttara Bhādrapadā Revatī".split(' ');
   const ni=Math.floor((((moonL%360)+360)%360)/(360/27))%27;
 
-  // R5: Planetary Hour
+  // R5: Planetary Hour + I Ching
   let pr="☉",pi2=0;
   try{
     const ris=AstronomyEngine.SearchRiseSet(day,AstroBody.Sun,true,obs);
@@ -209,11 +234,6 @@ function compute(now){
   const ri=Math.floor(((min+sec/60)/(24*60/14)*14)%14);
 
   // R10: Maya Tzolkin / Dreamspell
-  // 260-day cycle: 13 tones × 20 glyphs
-  // Correlation: day 0 = Aug 11, 3114 BC proleptic Gregorian (GMT correlation)
-  // In practice we just need a stable reference.
-  // Using a reference anchor: 2024-01-01 = Tzolkin 1 Imix (simplified for aesthetic)
-  // More accurate: compute Julian day then mod 260.
   function julianDay(y,m,d){
     if(m<=2){y-=1;m+=12}
     const a=Math.floor(y/100), b=2-a+Math.floor(a/4);
@@ -223,21 +243,42 @@ function compute(now){
   const TZOLKIN_GLYPH=["Imix","Ik","Akbal","Kan","Chicchan","Cimi","Manik","Lamat","Muluc","Oc","Chuen","Eb","Ben","Ix","Men","Cib","Caban","Etznab","Cauac","Ahau"];
   const TZOLKIN_TONE=["1","2","3","4","5","6","7","8","9","10","11","12","13"];
   const tzIdx=Math.floor(((jd+4897)%260)+260)%260;
-  const tzGlyph=TZOLKIN_GLYPH[tzIdx%20];
-  const tzTone=TZOLKIN_TONE[tzIdx%13];
+
+  // R11: Darqawi ḥurūf — inner isma'ili letter cycle (28 letters mapped to cosmic nodes)
+  const HURUF="أ ب ت ث ج ح خ د ذ ر ز س ش ص ض ط ظ ع غ ف ق ك ل م ن هـ و ي".split(' ');
+  const HURUF_MEANING=["Nūn","Bā'","Tā'","Thā'","Jīm","Ḥā'","Khā'","Dāl","Dhāl","Rā'","Zāy","Sīn","Shīn","Ṣād","Ḍād","Ṭā'","Ẓā'","ʿAyn","Ghayn","Fā'","Qāf","Kāf","Lām","Mīm","Nūn","Hā'","Wāw","Yā'"];
+  const hIdx=Math.floor(((hr*60+min)/(24*60)*28)%28);
+
+  // R12: DNA Codon Star — 64 codons mapped to I Ching hexagrams (3 bits × 4 bases)
+  const BASES=['A','T','C','G'];
+  const CODONS=[];
+  for(let a=0;a<4;a++)for(let b=0;b<4;b++)for(let c=0;c<4;c++) CODONS.push(BASES[a]+BASES[b]+BASES[c]);
+  // Deterministic codon from second-of-day
+  const secOfDay=hr*3600+min*60+sec;
+  const codonIdx=Math.floor(secOfDay/3600/24*64+secOfDay)%64;
+  const codon3=CODONS[((codonIdx%64)+64)%64];
+  // Map to nearest I Ching hexagram line text
+  const IC2=["Creating","Receiving","Beginning","Fool","Waiting","Conflict","Army","Union","Taming","Peace","Standstill","Fellowship","Possession","Modesty","Enthusiasm","Following","Decay","Approach","Contemplation","Biting","Grace","Splitting","Return","Innocence","Great Taming","Mouth","Great Exceeding","Water","Fire","Influence","Duration","Retreat","Power","Progress","Darkening","Family","Opposition","Obstruction","Deliverance","Decrease","Increase","Breakthrough","Meeting","Gathering","Welling","Arising","Nourishing","Taming Power","Pull Back","Exhaustion","Clinging","Fire Over Water"];
+  const codonHex=IC2[codonIdx%IC2.length];
+
+  // R13: Sphinx / Local Meridian
+  const lst=(hr+min/60+sec/3600)*15; // local sidereal time approximation
+  const meridianAlt=90-decGrid;
 
   return{
     utc:{v:now.toISOString().slice(0,19)+'Z'},
-    celtic:{v:"Celtic N"+(ci+1)+"·"+cd+" ("+CT[ci%13]+")",hebrew:rh,ha,hf},
-    chinese:{cn:R2cn,islamic:R2is},
-    zodiac:{bodies:RB},
-    moon:{phase:PN[pi],illum,nak:NK[ni]},
-    planetary:{ruler:pr,iching:IC[hi],pi:pi2},
-    sephiroth:{seph:SEPH[si%10],i:si%10},
-    flower:{phase:f7},
-    ticks:{sweep:sa},
-    muq:{idx:ri,muq:MQ[ri]},
-    tzolkin:{idx:tzIdx,glyph:tzGlyph,tone:tzTone},
+    R1:{v:"Celtic N"+(ci+1)+"·"+cd+" ("+CT[ci%13]+")",hebrew:rh,ha,hf},
+    R2:{cn:R2cn,islamic:R2is},
+    R3:{bodies:RB},
+    R4:{phase:PN[pi],illum,nak:NK[ni]},
+    R5:{ruler:pr,iching:IC[hi],pi:pi2},
+    R6:{seph:SEPH[si%10],i:si%10},
+    R7:{phase:f7},R8:{sweep:sa},
+    R9:{idx:ri,muq:MQ[ri]},
+    R10:{idx:tzIdx,glyph:TZOLKIN_GLYPH[tzIdx%20],tone:TZOLKIN_TONE[tzIdx%13]},
+    R11:{idx:hIdx,letter:HURUF[hIdx],meaning:HURUF_MEANING[hIdx]},
+    R12:{idx:codonIdx,codon:codon3,hex:codonHex},
+    R13:{ra:raGrid,dec:decGrid,lst,lstDeg:lst%360,meridianAlt},
     hr,min,sec,unix
   };
 }
@@ -246,277 +287,354 @@ function compute(now){
    PLUGGABLE RING DEFS
    ==================== */
 const RINGS=[
-  {
-    id:'utc',r:0.032,color:'#7b9fe0',label:'UTC', trailRate:1.0, epiK:7, epiD:0.012,
-    draw(ctx,R,w,M){
-      const r0=this.r*M;
-      if(showLabels||focusRing===0){
-        ctx.globalAlpha=(focusRing===-1||focusRing===0)?0.95:0.2;
-        ctx.fillStyle='#b8c4e0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText("UTC",wsx(0),wsy(-r0)-10);
-        ctx.font=fs(10);ctx.fillText(R.utc.v.slice(0,19),wsx(0),wsy(-r0)+4);
-      }
-    }
-  },
-  {
-    id:'celtic',r:0.100,color:'#7488b8',label:'CELTIC / HEBREW / ACTIVITY', trailRate:1/60, epiK:13, epiD:0.018,
-    draw(ctx,R,w,M){
-      const r0=this.r*M,g=RG,mid=(r0+g/2)*M;
-      ctx.strokeStyle='#9ab4d8';ctx.lineWidth=2.8;ctx.globalAlpha=0.85*(0.35+0.65*R.celtic.ha);
-      const arcLen=0.18*TAU;
-      const a0=(R.celtic.hf*TAU-0.5*arcLen)-0.5*TAU;
-      ctx.beginPath();ctx.arc(0,0,mid,a0,a0+arcLen);ctx.stroke();
-      ctx.globalAlpha=0.08;ctx.lineWidth=g*M*0.6;
-      ctx.beginPath();ctx.arc(0,0,mid,a0,a0+arcLen);ctx.stroke();
-      if(showLabels||focusRing===1){
-        ctx.globalAlpha=(focusRing===-1||focusRing===1)?0.9:0.15;
-        ctx.fillStyle='#a0b8d0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        const sx=wsx(0),sy=wsy(-r0);
-        ctx.fillText("CELTIC / HEBREW / ACTIVITY",sx,sy-6);
-        ctx.save();ctx.globalAlpha*=0.55;ctx.font=fs(8);ctx.fillStyle='#aac';
-        ctx.fillText("◐ "+R.celtic.ha.toFixed(2),sx,sy-0);ctx.restore();
-        ctx.fillText(R.celtic.v.slice(0,26),sx,sy+6);
-        ctx.fillText(R.celtic.hebrew.slice(0,22),sx,sy+17);
-      }
-    }
-  },
-  {
-    id:'chinese',r:0.168,color:'#88a09a',label:'CHINESE / ISLAMIC', trailRate:1/3600, epiK:9, epiD:0.014,
-    draw(ctx,R){
-      const r0=this.r*Rmax;
-      if(showLabels||focusRing===2){
-        ctx.globalAlpha=(focusRing===-1||focusRing===2)?0.9:0.15;
-        ctx.fillStyle='#a8c8c0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        const sx=wsx(0),sy=wsy(-r0*Rmax);
-        ctx.fillText("CHINESE / ISLAMIC",sx,sy-7);
-        ctx.font='11px sans-serif';ctx.fillText(R.chinese.cn,sx,sy+5);
-        ctx.font=fs(9);ctx.fillText(R.chinese.islamic,sx,sy+17);
-      }
-    }
-  },
-  {
-    id:'zodiac',r:0.246,color:'#88a0a0',label:'PLANETS', trailRate:1/86400, epiK:12, epiD:0.020,
-    draw(ctx,R){
-      const r0=this.r*Rmax,g=RG;
-      ctx.strokeStyle='#445';ctx.lineWidth=0.5;ctx.globalAlpha=0.25;
-      ctx.beginPath();ctx.arc(0,0,(r0+g/2)*Rmax,0,TAU);ctx.stroke();
-      ctx.globalAlpha=1;
-      for(let i=0;i<12;i++){
-        const a=i*30*DEG-90*DEG;
-        const x1=Math.cos(a)*r0*Rmax,y1=Math.sin(a)*r0*Rmax;
-        const x2=Math.cos(a)*(r0+g)*Rmax,y2=Math.sin(a)*(r0+g)*Rmax;
-        ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
-        ctx.strokeStyle=(i<R.zodiac.bodies.length)?(R.zodiac.bodies[i].c||'#556'):'#445';
-        ctx.lineWidth=1.2;ctx.globalAlpha=0.85;ctx.stroke();
-        const pm=Math.cos(a)*(r0+g*0.55)*Rmax,qm=Math.sin(a)*(r0+g*0.55)*Rmax;
-        if(showLabels&&(focusRing===3||focusRing===-1)&&i<R.zodiac.bodies.length){
-          ctx.save();ctx.fillStyle=R.zodiac.bodies[i].c||'#99b8d8';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-          ctx.fillText(R.zodiac.bodies[i].n,pm,qm);ctx.restore();
-        }
-        const xl=Math.cos(a+0.015)*(r0+g+4)*Rmax,yl=Math.sin(a+0.015)*(r0+g+4)*Rmax;
-        if(showLabels&&(focusRing===3||focusRing===-1)&&onScr(wsx(xl),wsy(yl))){
-          ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.55:0.1;
-          ctx.fillStyle='#99a';ctx.font=fs(9);ctx.textAlign='center';
-          ctx.fillText(ZN[i],wsx(xl),wsy(yl));
-        }
-      }
-      if(showLabels||focusRing===3){
-        ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.95:0.15;
-        ctx.fillStyle='#a0c0c0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText("PLANETS",wsx(0),wsy(-r0*Rmax)-8);
-        R.zodiac.bodies.forEach((b,i)=>{
-          const a=(i/7)*TAU-0.5;const px=Math.cos(a)*0.04*Rmax,py=Math.sin(a)*0.04*Rmax;
-          ctx.fillStyle=b.c||'#abc';ctx.fillText(b.n+b.s,wsx(px),wsy(py)+3);
-        });
-      }
-    }
-  },
-  {
-    id:'moon',r:0.324,color:'#90a888',label:'MOON / NAKSHATRA', trailRate:1/86400, epiK:27, epiD:0.022,
-    draw(ctx,R){
-      const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
-      const msa2=((moonL-sunL+360)%360);
-      const px2=Math.cos(msa2/360*TAU)*mid,py2=Math.sin(msa2/360*TAU)*mid;
-      ctx.fillStyle='#cfe';ctx.globalAlpha=0.9;
-      ctx.beginPath();ctx.arc(px2,py2,2.2,0,TAU);ctx.fill();
-      if(showLabels||focusRing===4){
-        ctx.globalAlpha=(focusRing===-1||focusRing===4)?0.9:0.15;
-        ctx.fillStyle='#a8c8a0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        const sx=wsx(0),sy=wsy(-r0*Rmax);
-        ctx.fillText("MOON",sx,sy-6);
-        ctx.fillText(R.moon.phase+" ["+(R.moon.illum*100).toFixed(1)+"%]",sx,sy+5);
-        ctx.fillStyle='#90a888';ctx.fillText("nak "+R.moon.nak,sx,sy+17);
-      }
-    }
-  },
-  {
-    id:'planetary',r:0.500,color:'#7b9fe0',label:'PLANETARY HR', trailRate:1/3600, epiK:7, epiD:0.016,
-    draw(ctx,R){
-      const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
-      ctx.strokeStyle='#6b90d0';ctx.globalAlpha=0.22;ctx.lineWidth=1;
-      ctx.beginPath();ctx.arc(0,0,mid,0,TAU);ctx.stroke();
-      const ang2=(R.planetary.pi/7)*TAU;
-      const px3=Math.cos(ang2)*mid,py3=Math.sin(ang2)*mid;
-      ctx.fillStyle='#6af';ctx.globalAlpha=0.85;
-      ctx.beginPath();ctx.arc(px3,py3,2.8,0,TAU);ctx.fill();
-      if(showLabels||focusRing===5){
-        ctx.globalAlpha=(focusRing===-1||focusRing===5)?0.9:0.15;
-        ctx.fillStyle='#8ab';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        const sx=wsx(0),sy=wsy(-r0*Rmax);
-        ctx.fillText("PLANETARY HR · "+R.planetary.ruler,sx,sy-6);
-        ctx.fillText("Hexagram "+(R.planetary.iching||'').slice(0,18),sx,sy+5);
-      }
-    }
-  },
-  {
-    id:'sephiroth',r:0.580,color:'#8c5c3d',label:'SEPHIROTH', trailRate:1/240, epiK:6, epiD:0.020,
-    draw(ctx,R){
-      const r0=this.r*Rmax,i=R.sephiroth.i;
-      ctx.strokeStyle=SC[i%10];ctx.globalAlpha=0.35;ctx.lineWidth=1.2;
-      ctx.beginPath();ctx.arc(0,0,RINGS[5].r*Rmax,0,TAU);ctx.stroke();
-      const a0=(i/6)*TAU;
-      ctx.strokeStyle=SC[i%10];ctx.globalAlpha=0.70;ctx.lineWidth=3;
-      ctx.beginPath();ctx.arc(0,0,(this.r+RG)*Rmax,a0,a0+TAU/6);ctx.stroke();
-      if(showLabels||focusRing===6){
-        ctx.globalAlpha=(focusRing===-1||focusRing===6)?0.9:0.15;
-        ctx.fillStyle=SC[i%10];ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        const sx=wsx(0),sy=wsy(-r0*Rmax);
-        ctx.fillText("SEPHIROTH",sx,sy-6);
-        ctx.font='bold '+fs(10);ctx.fillText(R.sephiroth.seph,sx,sy+5);
-      }
-    }
-  },
-  {
-    id:'flower',r:0.668,color:'#6e7',label:'FLOWER · Π', trailRate:1/420, epiK:7, epiD:0.018,
-    draw(ctx,R){
-      const r0=this.r*Rmax,mid=(r0+RG/2)*Rmax;
-      ctx.globalAlpha=0.18;ctx.strokeStyle='#6e7';ctx.lineWidth=0.8;
-      for(let k=0;k<7;k++){
-        const a=R.flower.phase+k*TAU/7,dc=mid*0.5;
-        ctx.beginPath();ctx.arc(Math.cos(a)*dc,Math.sin(a)*dc,mid*0.28,0,TAU);ctx.stroke();
-      }
-      ctx.lineWidth=1;ctx.globalAlpha=0.22;
-      ctx.beginPath();ctx.arc(0,0,mid*0.28,0,TAU);ctx.stroke();
-      if(showLabels||focusRing===7){
-        ctx.globalAlpha=(focusRing===-1||focusRing===7)?0.75:0.12;
-        ctx.fillStyle='#6e7';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText("FLOWER · Π",wsx(0),wsy(-r0*Rmax)-4);
-      }
-    }
-  },
-  {
-    id:'ticks',r:0.794,color:'#3d4a6b',label:'', trailRate:6*DEG, epiK:360, epiD:0.000,
-    draw(ctx,R){
-      const r0=(this.r-0.012)*Rmax,r1=this.r*Rmax;
-      ctx.strokeStyle='#3d4a6b';ctx.lineWidth=0.5;
-      for(let i=0;i<360;i++){
-        const a=i*DEG-90*DEG;
-        const major=i%30===0,minor=i%5===0;
-        const l=major?6:minor?3.5:1.2;
-        ctx.beginPath();ctx.moveTo(Math.cos(a)*(r1-l),Math.sin(a)*(r1-l));
-        ctx.lineTo(Math.cos(a)*r1,Math.sin(a)*r1);
-        ctx.globalAlpha=major?0.6:minor?0.35:0.14;
-        ctx.lineWidth=major?0.8:minor?0.6:0.4;ctx.stroke();
-      }
-      ctx.save();ctx.globalAlpha=0.9;
-      const swR=this.r*Rmax;
-      ctx.strokeStyle='#7b9fe0';ctx.lineWidth=2;
-      ctx.beginPath();ctx.moveTo(0,0);
-      ctx.lineTo(Math.cos(R.ticks.sweep-90*DEG)*swR,Math.sin(R.ticks.sweep-90*DEG)*swR);ctx.stroke();
-      const mm=RINGS[6].r-0.02;
-      ctx.strokeStyle='#b8c4e0';ctx.lineWidth=2.5;
-      ctx.beginPath();ctx.moveTo(0,0);
-      ctx.lineTo(Math.cos(R.min*6*DEG-90*DEG)*mm*Rmax,Math.sin(R.min*6*DEG-90*DEG)*mm*Rmax);ctx.stroke();
-      const hh=RINGS[6].r-0.05;
-      ctx.strokeStyle='#dde';ctx.lineWidth=3;
-      ctx.beginPath();ctx.moveTo(0,0);
-      ctx.lineTo(Math.cos(R.hr*30*DEG-90*DEG)*hh*Rmax,Math.sin(R.hr*30*DEG-90*DEG)*hh*Rmax);ctx.stroke();
-      ctx.fillStyle='#7b9fe0';ctx.globalAlpha=0.9;
-      ctx.beginPath();ctx.arc(0,0,2.2/camZ,0,TAU);ctx.fill();
-      ctx.restore();
-    }
-  },
-  {
-    id:'muq',r:0.428,color:'#a89c6c',label:"MUQATTA'AT", trailRate:1/840, epiK:14, epiD:0.016,
-    draw(ctx,R){
-      const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
-      ctx.strokeStyle='#a89c6c';ctx.lineWidth=0.8;ctx.globalAlpha=0.25;
-      ctx.beginPath();ctx.arc(0,0,mid,0,TAU);ctx.stroke();
-      const idx=R.muq.idx;
-      const ang=(idx/14)*TAU-0.5*TAU;
-      const tx=Math.cos(ang)*mid,ty=Math.sin(ang)*mid;
-      ctx.strokeStyle='#a89c6c';ctx.globalAlpha=0.45;ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(tx,ty);ctx.stroke();
-      ctx.fillStyle='#ffe8b0';ctx.globalAlpha=0.9;
-      ctx.beginPath();ctx.arc(tx,ty,3.5/camZ,0,TAU);ctx.fill();
-      if(showLabels||focusRing===9){
-        ctx.globalAlpha=(focusRing===-1||focusRing===9)?0.85:0.12;
-        ctx.fillStyle='#c9a860';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText("MUQATTA'AT",wsx(0),wsy(-r0*Rmax)-6);
-        const mq=R.muq.muq;
-        if(mq){ctx.font=fs(9);ctx.fillStyle='#887';ctx.globalAlpha*=0.6;
-          ctx.fillText(mq.lat+' · '+mq.txt.slice(0,12),wsx(0),wsy(-r0*Rmax)+14)}
-      }
-    }
-  },
-  {
-    id:'tzolkin',r:0.854,color:'#c97',label:'TZOLKIN / DREAMSPELL', trailRate:1/86400, epiK:13, epiD:0.022,
-    draw(ctx,R){
-      const r0=this.r*Rmax,g=0.040,r1=r0+g;
-      // outer solar seal ring
-      ctx.strokeStyle='#c97';ctx.lineWidth=0.8;ctx.globalAlpha=0.22;
-      ctx.beginPath();ctx.arc(0,0,(r0+g/2)*Rmax,0,TAU);ctx.stroke();
-      // 20 seal dots
-      for(let i=0;i<20;i++){
-        const a=(i/20)*TAU-0.5*TAU;
-        const px=Math.cos(a)*r0*Rmax,py=Math.sin(a)*r0*Rmax;
-        ctx.fillStyle='#c97';ctx.globalAlpha=0.55;
-        ctx.beginPath();ctx.arc(px,py,3,0,TAU);ctx.fill();
-      }
-      // active glyph marker
-      const ag=(R.tzolkin.idx%20)/20*TAU-0.5*TAU;
-      const ar=r0*Rmax*0.92;
-      ctx.fillStyle='#ffd8a0';ctx.globalAlpha=0.95;
-      ctx.beginPath();ctx.arc(Math.cos(ag)*ar,Math.sin(ag)*ar,5,0,TAU);ctx.fill();
-      if(showLabels||focusRing===10){
-        ctx.globalAlpha=(focusRing===-1||focusRing===10)?0.9:0.15;
-        ctx.fillStyle='#c9a';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
-        const sx=wsx(0),sy=wsy(-r0*Rmax);
-        ctx.fillText("TZOLKIN · "+R.tzolkin.tone+" "+R.tzolkin.glyph, sx, sy-6);
-        ctx.font=fs(8);ctx.fillStyle='#987';
-        ctx.fillText("260-day cycle · "+R.tzolkin.idx,sx,sy+16);
-      }
-    }
- },
-
-  {
-    id:'trace',r:0.000,color:'#ffffff',label:'', trailRate:0, epiK:0, epiD:0,
-    draw(ctx,R,W){
-      // No ring geometry; just overlay traces on all rings
+{ id:'utc', r:0.032, color:'#7b9fe0', label:'UTC',  trailRate:1.0,    epiK:7,   epiD:0.012,
+  draw(ctx,R){
+    const r0=this.r*Rmax;
+    if(showLabels||focusRing===0){
+      ctx.globalAlpha=(focusRing===-1||focusRing===0)?0.95:0.2;
+      ctx.fillStyle='#b8c4e0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText("UTC",wsx(0),wsy(-r0)-10);
+      ctx.font=fs(10);ctx.fillText(R.utc.v.slice(0,19),wsx(0),wsy(-r0)+4);
     }
   }
+},
+{ id:'celtic', r:0.100, color:'#7488b8', label:'CELTIC / HEBREW', trailRate:1/60, epiK:13, epiD:0.018,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
+    ctx.strokeStyle='#9ab4d8';ctx.lineWidth=2.8;ctx.globalAlpha=0.85*(0.35+0.65*R.R1.ha);
+    const arcLen=0.18*TAU;
+    const a0=(R.R1.hf*TAU-0.5*arcLen)-0.5*TAU;
+    ctx.beginPath();ctx.arc(0,0,mid,a0,a0+arcLen);ctx.stroke();
+    ctx.globalAlpha=0.08;ctx.lineWidth=g*Rmax*0.6;
+    ctx.beginPath();ctx.arc(0,0,mid,a0,a0+arcLen);ctx.stroke();
+    if(showLabels||focusRing===1){
+      ctx.globalAlpha=(focusRing===-1||focusRing===1)?0.9:0.15;
+      ctx.fillStyle='#a0b8d0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0);
+      ctx.fillText("CELTIC / HEBREW",sx,sy-6);
+      ctx.save();ctx.globalAlpha*=0.55;ctx.font=fs(8);ctx.fillStyle='#aac';
+      ctx.fillText("◐ "+R.R1.ha.toFixed(2),sx,sy-0);ctx.restore();
+      ctx.fillText(R.R1.v.slice(0,26),sx,sy+6);
+      ctx.fillText(R.R1.hebrew.slice(0,22),sx,sy+17);
+    }
+  }
+},
+{ id:'chinese', r:0.168, color:'#88a09a', label:'CHINESE / ISLAMIC', trailRate:1/3600, epiK:9, epiD:0.014,
+  draw(ctx,R){
+    const r0=this.r*Rmax;
+    if(showLabels||focusRing===2){
+      ctx.globalAlpha=(focusRing===-1||focusRing===2)?0.9:0.15;
+      ctx.fillStyle='#a8c8c0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("CHINESE / ISLAMIC",sx,sy-7);
+      ctx.font='11px sans-serif';ctx.fillText(R.R2.cn,sx,sy+5);
+      ctx.font=fs(9);ctx.fillText(R.R2.islamic,sx,sy+17);
+    }
+  }
+},
+{ id:'zodiac', r:0.246, color:'#88a0a0', label:'PLANETS', trailRate:1/86400, epiK:12, epiD:0.020,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=RG;
+    ctx.strokeStyle='#445';ctx.lineWidth=0.5;ctx.globalAlpha=0.25;
+    ctx.beginPath();ctx.arc(0,0,(r0+g/2)*Rmax,0,TAU);ctx.stroke();
+    ctx.globalAlpha=1;
+    for(let i=0;i<12;i++){
+      const a=i*30*DEG-90*DEG;
+      const x1=Math.cos(a)*r0*Rmax,y1=Math.sin(a)*r0*Rmax;
+      const x2=Math.cos(a)*(r0+g)*Rmax,y2=Math.sin(a)*(r0+g)*Rmax;
+      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+      ctx.strokeStyle=(i<R.R3.bodies.length)?(R.R3.bodies[i].c||'#556'):'#445';
+      ctx.lineWidth=1.2;ctx.globalAlpha=0.85;ctx.stroke();
+      const pm=Math.cos(a)*(r0+g*0.55)*Rmax,qm=Math.sin(a)*(r0+g*0.55)*Rmax;
+      if(showLabels&&(focusRing===3||focusRing===-1)&&i<R.R3.bodies.length){
+        ctx.save();ctx.fillStyle=R.R3.bodies[i].c||'#99b8d8';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(R.R3.bodies[i].n,pm,qm);ctx.restore();
+      }
+      const xl=Math.cos(a+0.015)*(r0+g+4)*Rmax,yl=Math.sin(a+0.015)*(r0+g+4)*Rmax;
+      if(showLabels&&(focusRing===3||focusRing===-1)&&onScr(wsx(xl),wsy(yl))){
+        ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.55:0.1;
+        ctx.fillStyle='#99a';ctx.font=fs(9);ctx.textAlign='center';
+        ctx.fillText(ZN[i],wsx(xl),wsy(yl));
+      }
+    }
+    if(showLabels||focusRing===3){
+      ctx.globalAlpha=(focusRing===-1||focusRing===3)?0.95:0.15;
+      ctx.fillStyle='#a0c0c0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText("PLANETS",wsx(0),wsy(-r0*Rmax)-8);
+      R.R3.bodies.forEach((b,i)=>{
+        const a=(i/7)*TAU-0.5;const px=Math.cos(a)*0.04*Rmax,py=Math.sin(a)*0.04*Rmax;
+        ctx.fillStyle=b.c||'#abc';ctx.fillText(b.n+b.s,wsx(px),wsy(py)+3);
+      });
+    }
+  }
+},
+{ id:'moon', r:0.324, color:'#90a888', label:'MOON / NAKSHATRA', trailRate:1/86400, epiK:27, epiD:0.022,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
+    const msa2=((moonL-sunL+360)%360);
+    const px2=Math.cos(msa2/360*TAU)*mid,py2=Math.sin(msa2/360*TAU)*mid;
+    ctx.fillStyle='#cfe';ctx.globalAlpha=0.9;
+    ctx.beginPath();ctx.arc(px2,py2,2.2,0,TAU);ctx.fill();
+    if(showLabels||focusRing===4){
+      ctx.globalAlpha=(focusRing===-1||focusRing===4)?0.9:0.15;
+      ctx.fillStyle='#a8c8a0';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("MOON",sx,sy-6);
+      ctx.fillText(R.R4.phase+" ["+(R.R4.illum*100).toFixed(1)+"%]",sx,sy+5);
+      ctx.fillStyle='#90a888';ctx.fillText("nak "+R.R4.nak,sx,sy+17);
+    }
+  }
+},
+{ id:'planetary', r:0.500, color:'#7b9fe0', label:'PLANETARY HR', trailRate:1/3600, epiK:7, epiD:0.016,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
+    ctx.strokeStyle='#6b90d0';ctx.globalAlpha=0.22;ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(0,0,mid,0,TAU);ctx.stroke();
+    const ang2=(R.R5.pi/7)*TAU;
+    const px3=Math.cos(ang2)*mid,py3=Math.sin(ang2)*mid;
+    ctx.fillStyle='#6af';ctx.globalAlpha=0.85;
+    ctx.beginPath();ctx.arc(px3,py3,2.8,0,TAU);ctx.fill();
+    if(showLabels||focusRing===5){
+      ctx.globalAlpha=(focusRing===-1||focusRing===5)?0.9:0.15;
+      ctx.fillStyle='#8ab';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("PLANETARY HR · "+R.R5.ruler,sx,sy-6);
+      ctx.fillText("Hexagram "+(R.R5.iching||'').slice(0,18),sx,sy+5);
+    }
+  }
+},
+{ id:'sephiroth', r:0.580, color:'#8c5c3d', label:'SEPHIROTH', trailRate:1/240, epiK:6, epiD:0.020,
+  draw(ctx,R){
+    const r0=this.r*Rmax,i=R.R6.i;
+    ctx.strokeStyle=SC[i%10];ctx.globalAlpha=0.35;ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.arc(0,0,RINGS[5].r*Rmax,0,TAU);ctx.stroke();
+    const a0=(i/6)*TAU;
+    ctx.strokeStyle=SC[i%10];ctx.globalAlpha=0.70;ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(0,0,(this.r+RG)*Rmax,a0,a0+TAU/6);ctx.stroke();
+    if(showLabels||focusRing===6){
+      ctx.globalAlpha=(focusRing===-1||focusRing===6)?0.9:0.15;
+      ctx.fillStyle=SC[i%10];ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("SEPHIROTH",sx,sy-6);
+      ctx.font='bold '+fs(10);ctx.fillText(R.R6.seph,sx,sy+5);
+    }
+  }
+},
+{ id:'flower', r:0.668, color:'#6e7', label:'FLOWER · Π', trailRate:1/420, epiK:7, epiD:0.018,
+  draw(ctx,R){
+    const r0=this.r*Rmax,mid=(r0+RG/2)*Rmax;
+    ctx.globalAlpha=0.18;ctx.strokeStyle='#6e7';ctx.lineWidth=0.8;
+    for(let k=0;k<7;k++){
+      const a=R.R7.phase+k*TAU/7,dc=mid*0.5;
+      ctx.beginPath();ctx.arc(Math.cos(a)*dc,Math.sin(a)*dc,mid*0.28,0,TAU);ctx.stroke();
+    }
+    ctx.lineWidth=1;ctx.globalAlpha=0.22;
+    ctx.beginPath();ctx.arc(0,0,mid*0.28,0,TAU);ctx.stroke();
+    if(showLabels||focusRing===7){
+      ctx.globalAlpha=(focusRing===-1||focusRing===7)?0.75:0.12;
+      ctx.fillStyle='#6e7';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText("FLOWER · Π",wsx(0),wsy(-r0*Rmax)-4);
+    }
+  }
+},
+{ id:'ticks', r:0.794, color:'#3d4a6b', label:'', trailRate:6*DEG, epiK:360, epiD:0.000,
+  draw(ctx,R){
+    const r0=(this.r-0.012)*Rmax,r1=this.r*Rmax;
+    ctx.strokeStyle='#3d4a6b';ctx.lineWidth=0.5;
+    for(let i=0;i<360;i++){
+      const a=i*DEG-90*DEG;
+      const major=i%30===0,minor=i%5===0;
+      const l=major?6:minor?3.5:1.2;
+      ctx.beginPath();ctx.moveTo(Math.cos(a)*(r1-l),Math.sin(a)*(r1-l));
+      ctx.lineTo(Math.cos(a)*r1,Math.sin(a)*r1);
+      ctx.globalAlpha=major?0.6:minor?0.35:0.14;
+      ctx.lineWidth=major?0.8:minor?0.6:0.4;ctx.stroke();
+    }
+    ctx.save();ctx.globalAlpha=0.9;
+    const swR=this.r*Rmax;
+    ctx.strokeStyle='#7b9fe0';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR,Math.sin(R.R8.sweep-90*DEG)*swR);ctx.stroke();
+    const mm=RINGS[6].r-0.02;
+    ctx.strokeStyle='#b8c4e0';ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.min*6*DEG-90*DEG)*mm*Rmax,Math.sin(R.min*6*DEG-90*DEG)*mm*Rmax);ctx.stroke();
+    const hh=RINGS[6].r-0.05;
+    ctx.strokeStyle='#dde';ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.hr*30*DEG-90*DEG)*hh*Rmax,Math.sin(R.hr*30*DEG-90*DEG)*hh*Rmax);ctx.stroke();
+    ctx.fillStyle='#7b9fe0';ctx.globalAlpha=0.9;
+    ctx.beginPath();ctx.arc(0,0,2.2/camZ,0,TAU);ctx.fill();
+    ctx.restore();
+  }
+},
+{ id:'muq', r:0.428, color:'#a89c6c', label:"MUQATTA'AT", trailRate:1/840, epiK:14, epiD:0.016,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=RG,mid=(r0+g/2)*Rmax;
+    ctx.strokeStyle='#a89c6c';ctx.lineWidth=0.8;ctx.globalAlpha=0.25;
+    ctx.beginPath();ctx.arc(0,0,mid,0,TAU);ctx.stroke();
+    const idx=R.R9.idx;
+    const ang=(idx/14)*TAU-0.5*TAU;
+    const tx=Math.cos(ang)*mid,ty=Math.sin(ang)*mid;
+    ctx.strokeStyle='#a89c6c';ctx.globalAlpha=0.45;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(tx,ty);ctx.stroke();
+    ctx.fillStyle='#ffe8b0';ctx.globalAlpha=0.9;
+    ctx.beginPath();ctx.arc(tx,ty,3.5/camZ,0,TAU);ctx.fill();
+    if(showLabels||focusRing===9){
+      ctx.globalAlpha=(focusRing===-1||focusRing===9)?0.85:0.12;
+      ctx.fillStyle='#c9a860';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText("MUQATTA'AT",wsx(0),wsy(-r0*Rmax)-6);
+      const mq=R.R9.muq;
+      if(mq){ctx.font=fs(9);ctx.fillStyle='#887';ctx.globalAlpha*=0.6;
+        ctx.fillText(mq.lat+' · '+mq.txt.slice(0,12),wsx(0),wsy(-r0*Rmax)+14)}
+    }
+  }
+},
+{ id:'tzolkin', r:0.854, color:'#c97', label:'TZOLKIN / DREAMSPELL', trailRate:1/86400, epiK:13, epiD:0.022,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=0.040,r1=r0+g;
+    ctx.strokeStyle='#c97';ctx.lineWidth=0.8;ctx.globalAlpha=0.22;
+    ctx.beginPath();ctx.arc(0,0,(r0+g/2)*Rmax,0,TAU);ctx.stroke();
+    for(let i=0;i<20;i++){
+      const a=(i/20)*TAU-0.5*TAU;
+      const px=Math.cos(a)*r0*Rmax,py=Math.sin(a)*r0*Rmax;
+      ctx.fillStyle='#c97';ctx.globalAlpha=0.55;
+      ctx.beginPath();ctx.arc(px,py,3,0,TAU);ctx.fill();
+    }
+    const ag=(R.R10.idx%20)/20*TAU-0.5*TAU;
+    const ar=r0*Rmax*0.92;
+    ctx.fillStyle='#ffd8a0';ctx.globalAlpha=0.95;
+    ctx.beginPath();ctx.arc(Math.cos(ag)*ar,Math.sin(ag)*ar,5,0,TAU);ctx.fill();
+    if(showLabels||focusRing===10){
+      ctx.globalAlpha=(focusRing===-1||focusRing===10)?0.9:0.15;
+      ctx.fillStyle='#c9a';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("TZOLKIN · "+R.R10.tone+" "+R.R10.glyph, sx, sy-6);
+      ctx.font=fs(8);ctx.fillStyle='#987';
+      ctx.fillText("260-day cycle · "+R.R10.idx,sx,sy+16);
+    }
+  }
+},
+{ id:'huruf', r:0.740, color:'#9aa', label:'ḤURŪF / ISMAʿILI', trailRate:1/720, epiK:28, epiD:0.018,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=0.028,mid=(r0+g/2)*Rmax;
+    ctx.strokeStyle='#9aa';ctx.lineWidth=0.8;ctx.globalAlpha=0.25;
+    ctx.beginPath();ctx.arc(0,0,mid,0,TAU);ctx.stroke();
+    for(let i=0;i<28;i++){
+      const a=(i/28)*TAU-0.5*TAU;
+      const px=Math.cos(a)*r0*Rmax,py=Math.sin(a)*r0*Rmax;
+      if(i===R.R11.idx){
+        ctx.fillStyle='#e8c8ff';ctx.globalAlpha=0.95;
+        ctx.beginPath();ctx.arc(px,py,4,0,TAU);ctx.fill();
+      }else{
+        ctx.fillStyle='#9aa';ctx.globalAlpha=0.4;
+        ctx.beginPath();ctx.arc(px,py,2,0,TAU);ctx.fill();
+      }
+    }
+    if(showLabels||focusRing===11){
+      ctx.globalAlpha=(focusRing===-1||focusRing===11)?0.9:0.15;
+      ctx.fillStyle='#c9a';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("ḤURŪF · "+R.R11.letter, sx, sy-6);
+      ctx.font=fs(8);ctx.fillStyle='#987';
+      ctx.fillText(R.R11.meaning,sx,sy+16);
+    }
+  }
+},
+{ id:'codon', r:0.910, color:'#a8f', label:'DNA CODON', trailRate:1/120, epiK:64, epiD:0.016,
+  draw(ctx,R){
+    const r0=this.r*Rmax,g=0.032,mid=(r0+g/2)*Rmax;
+    ctx.strokeStyle='#a8f';ctx.lineWidth=0.8;ctx.globalAlpha=0.20;
+    ctx.beginPath();ctx.arc(0,0,mid,0,TAU);ctx.stroke();
+    // 64 codon markers around ring
+    for(let i=0;i<64;i++){
+      const a=(i/64)*TAU-0.5*TAU;
+      const px=Math.cos(a)*r0*Rmax,py=Math.sin(a)*r0*Rmax;
+      const active = i===R.R12.idx;
+      ctx.fillStyle=active?'#fff':'#a8f';
+      ctx.globalAlpha=active?0.95:0.25;
+      ctx.beginPath();ctx.arc(px,py,active?3.5:1.2,0,TAU);ctx.fill();
+    }
+    if(showLabels||focusRing===12){
+      ctx.globalAlpha=(focusRing===-1||focusRing===12)?0.9:0.15;
+      ctx.fillStyle='#c9f';ctx.font=fs(9);ctx.textAlign='center';ctx.textBaseline='middle';
+      const sx=wsx(0),sy=wsy(-r0*Rmax);
+      ctx.fillText("DNA CODON · "+R.R12.codon, sx, sy-6);
+      ctx.font=fs(8);ctx.fillStyle='#987';
+      ctx.fillText(R.R12.hex,sx,sy+16);
+    }
+  }
+},
+{ id:'sphinx', r:0.960, color:'#7b9fe0', label:'MERIDIAN / ECLIPTIC', trailRate:6*DEG, epiK:360, epiD:0.000,
+  draw(ctx,R){
+    const r0=(this.r-0.012)*Rmax,r1=this.r*Rmax;
+    ctx.strokeStyle='#3d4a6b';ctx.lineWidth=0.5;
+    for(let i=0;i<360;i++){
+      const a=i*DEG-90*DEG;
+      const major=i%30===0,minor=i%5===0;
+      const l=major?6:minor?3.5:1.2;
+      ctx.beginPath();ctx.moveTo(Math.cos(a)*(r1-l),Math.sin(a)*(r1-l));
+      ctx.lineTo(Math.cos(a)*r1,Math.sin(a)*r1);
+      ctx.globalAlpha=major?0.6:minor?0.35:0.14;
+      ctx.lineWidth=major?0.8:minor?0.6:0.4;ctx.stroke();
+    }
+    // RA/Dec grid arcs
+    ctx.globalAlpha=0.12;ctx.strokeStyle='#7b9fe0';ctx.lineWidth=0.5;
+    for(let dec=-60;dec<=60;dec+=30){
+      const rProjected=Math.cos(dec*DEG)*Rmax*RINGS[11].r;
+      ctx.beginPath();ctx.arc(0,0,rProjected,0,TAU);ctx.stroke();
+    }
+    ctx.strokeStyle='#7b9fe0';ctx.lineWidth=0.4;ctx.globalAlpha=0.08;
+    ctx.beginPath();ctx.moveTo(-Rmax*RINGS[11].r,0);ctx.lineTo(Rmax*RINGS[11].r,0);ctx.stroke();
+
+    // Meridian indicator
+    const merA=(R.R13.lstDeg%360)*DEG-90*DEG;
+    ctx.strokeStyle='#ff9';ctx.lineWidth=1.8;ctx.globalAlpha=0.7;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(merA)*r1,Math.sin(merA)*r1);ctx.stroke();
+
+    ctx.save();ctx.globalAlpha=0.9;
+    const swR=this.r*Rmax;
+    ctx.strokeStyle='#7b9fe0';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR,Math.sin(R.R8.sweep-90*DEG)*swR);ctx.stroke();
+    const mm=RINGS[6].r-0.02;
+    ctx.strokeStyle='#b8c4e0';ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.min*6*DEG-90*DEG)*mm*Rmax,Math.sin(R.min*6*DEG-90*DEG)*mm*Rmax);ctx.stroke();
+    const hh=RINGS[6].r-0.05;
+    ctx.strokeStyle='#dde';ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(0,0);
+    ctx.lineTo(Math.cos(R.hr*30*DEG-90*DEG)*hh*Rmax,Math.sin(R.hr*30*DEG-90*DEG)*hh*Rmax);ctx.stroke();
+    ctx.fillStyle='#7b9fe0';ctx.globalAlpha=0.9;
+    ctx.beginPath();ctx.arc(0,0,2.2/camZ,0,TAU);ctx.fill();
+    ctx.restore();
+  }
+ }
 ];
 
 /* ====================
-   TRACE STATE — spirograph trails
+   TRACES
    ==================== */
-let lastTrailTime = 0;
-const TRAIL_MAX = 320;
-let trails = new Array(RINGS.length).fill(null).map(()=>[]);
+const TRAIL_MAX=320;
+let trails=new Array(RINGS.length).fill(null).map(()=>[]);
+let lastTrailUpdate=0;
 
-function spiro(t, k, Rr, d){
-  // Epitrochoid parametric
-  const x = ((Rr) + d*Math.cos(k*t)) * Math.cos(t);
-  const y = ((Rr) + d*Math.cos(k*t)) * Math.sin(t);
-  return {x,y};
+function spiro(t,k,Rr,d){
+  const x=((Rr)+d*Math.cos(k*t))*Math.cos(t);
+  const y=((Rr)+d*Math.cos(k*t))*Math.sin(t);
+  return{x,y};
 }
 
-function updateTrails(now,R,dt){
+function updateTrails(now,R){
+  const t=now.getTime()/1000;
+  if(t-lastTrailUpdate < 1/30){return}
+  lastTrailUpdate=t;
   for(let i=0;i<RINGS.length;i++){
     const ring=RINGS[i];
-    if(ring.trailRate <= 0 || ring.id==='trace') continue;
-    trails[i].push({t:now.getTime()/1000, rate:ring.trailRate, epiK:ring.epiK, epiD:ring.epiD, r:ring.r});
-    if(trails[i].length > TRAIL_MAX) trails[i].shift();
+    if(!ring.trailRate||ring.id==='sphinx') continue;
+    if(trails[i].length>=TRAIL_MAX) trails[i].shift();
+    trails[i].push({t:t*ring.trailRate, epiK:ring.epiK, epiD:ring.epiD, r:ring.r*Rmax});
   }
 }
 
@@ -524,21 +642,15 @@ function drawTrails(){
   if(!showTraces) return;
   for(let i=0;i<RINGS.length;i++){
     const ring=RINGS[i];
-    if(ring.trailRate <= 0 || ring.id==='trace') continue;
+    if(!ring.trailRate||ring.id==='sphinx') continue;
     const arr=trails[i];
     if(arr.length<2) continue;
-    ctx.save();
-    ctx.strokeStyle=ring.color;
-    ctx.lineWidth=1.2;
+    ctx.save();ctx.strokeStyle=ring.color;ctx.lineWidth=1.2;
     for(let j=1;j<arr.length;j++){
-      const prev=arr[j-1], cur=arr[j];
-      const dt = cur.t - prev.t;
-      const t = cur.t * cur.rate;
-      const pt = prev.t * prev.rate;
-      const Rp = ring.r * Rmax;
-      const p1=spiro(pt, cur.epiK, Rp, cur.epiD*Rmax);
-      const p2=spiro(t, cur.epiK, Rp, cur.epiD*Rmax);
-      ctx.globalAlpha = 0.04 + 0.35 * (j / arr.length);
+      const prev=arr[j-1],cur=arr[j];
+      const p1=spiro(prev.t,cur.epiK,cur.r,cur.epiD*Rmax);
+      const p2=spiro(cur.t,cur.epiK,cur.r,cur.epiD*Rmax);
+      ctx.globalAlpha=0.04+0.35*(j/arr.length);
       ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();
     }
     ctx.restore();
@@ -567,19 +679,16 @@ function draw(now,R){
   $.fillStyle=pg;$.globalAlpha=0.85*bt;$.beginPath();$.arc(0,0,pr/camZ,0,TAU);$.fill();
   $.globalAlpha=1;
 
-  // Traces (underneath rings)
   drawTrails();
 
-  // Rings
   for(let i=0;i<RINGS.length;i++){
-    if(RINGS[i].id==='trace') continue;
+    if(RINGS[i].id==='sphinx') continue;
     $.save();
-    try{ RINGS[i].draw($,R,W,H); }catch(e){}
+    try{ RINGS[i].draw($,R); }catch(e){}
     $.restore();
   }
 
-  // Focal ring highlight
-  if(focusRing>=0 && focusRing < RINGS.length && RINGS[focusRing].id!=='trace'){
+  if(focusRing>=0 && focusRing<RINGS.length && RINGS[focusRing].id!=='sphinx'){
     const rf=RINGS[focusRing].r;
     $.save();$.strokeStyle='rgba(123,159,224,0.6)';$.lineWidth=1;
     $.beginPath();$.arc(0,0,rf*Rmax,0,TAU);$.stroke();
@@ -595,14 +704,17 @@ function info(R){
   const el=document.getElementById('info');
   const ln=(a,b)=>`<span class="val">${a}</span><span class="sep">·</span>${b}`;
   el.innerHTML=[
-    ln('UTC',R.utc.v),ln('CELTIC',R.celtic.v.slice(0,22)),
-    ln('HEB',R.celtic.hebrew.slice(0,20)),ln('CHINESE',R.chinese.cn),
-    ln('ISL',R.chinese.islamic),
-    ln('MOON',(R.moon.phase||'')+' '+R.moon.nak),
-    ln('HR',R.planetary.ruler+' '+(R.planetary.iching||'').slice(0,12)),
-    ln('SEPH',R.sephiroth.seph),
-    ln('MUQ',(R.muq.muq?R.muq.muq.lat:'')+' · '+(R.muq.muq?R.muq.muq.txt.slice(0,10):'')),
-    ln('TZOL',R.tzolkin.tone+' '+R.tzolkin.glyph),
+    ln('UTC',R.utc.v),ln('CELTIC',R.R1.v.slice(0,22)),
+    ln('HEB',R.R1.hebrew.slice(0,20)),ln('CHINESE',R.R2.cn),
+    ln('ISL',R.R2.islamic),
+    ln('MOON',(R.R4.phase||'')+' '+R.R4.nak),
+    ln('HR',R.R5.ruler+' '+(R.R5.iching||'').slice(0,12)),
+    ln('SEPH',R.R6.seph),
+    ln('MUQ',(R.R9.muq?R.R9.muq.lat:'')+' · '+(R.R9.muq?R.R9.muq.txt.slice(0,10):'')),
+    ln('TZOL',R.R10.tone+' '+R.R10.glyph),
+    ln('ḤURŪF',R.R11.letter+' ('+R.R11.meaning.slice(0,10)+')'),
+    ln('CODON',R.R12.codon+' · '+R.R12.hex.slice(0,14)),
+    ln('MERIDIAN',(R.R13.lstDeg||0).toFixed(1)+'°'),
     ln('SEED',seed?seed.seed:'')
   ].map(s=>`<div>${s}</div>`).join('');
 }
@@ -614,11 +726,10 @@ function loop(){
   const now=new Date();
   const R=compute(now);
   seed=loadSeed(now,R);
-  const dt = 1/60;
-  updateTrails(now,R,dt);
+  updateTrails(now,R);
   draw(now,R);
   info(R);
-  document.getElementById('seed').textContent="COHERENT · "+now.toISOString().slice(0,10)+" · "+seed.seed;
+  document.getElementById('seed').textContent="COHERENCE · "+now.toISOString().slice(0,10)+" · "+seed.seed;
   const s=Math.floor(now.getTime()/1000);
   if(s!==lastSec){lastSec=s;document.title=R.utc.v.slice(0,19)+' · COSMIC CLOCK'}
   requestAnimationFrame(loop);
@@ -637,15 +748,24 @@ window.addEventListener('keydown',e=>{
   if(k==='?'){const h=document.getElementById('help');h.style.display=h.style.display==='none'?'flex':'none'}
   if(k==='`') C.style.cursor=C.style.cursor==='none'?'grab':'none';
   if(k==='t'||k==='T'){showTraces=!showTraces}
+  if(k==='s'||k==='S'){doShare()}
 });
 document.getElementById('info').style.opacity='1';
 
-// Help
+function doShare(){
+  try{
+    const url=window.location.origin+window.location.pathname+'#seed='+(seed?seed.seed:'');
+    const msg='COHERENT · '+now.toISOString().slice(0,10)+' · '+(seed?seed.seed:'');
+    if(navigator.share){navigator.share({title:'Cosmic Clock',text:msg,url:url}).then(()=>{})}
+    else{window.prompt('COPY LINK',url)}
+  }catch(e){}
+}
+
 document.getElementById('help').innerHTML=[
-  'R0 UTC','R1 Celtic/Hebrew/Activity','R2 Chinese/Islamic','R3 Zodiac/Planets',
+  'R0 UTC','R1 Celtic/Hebrew','R2 Chinese/Islamic','R3 Zodiac/Planets',
   'R4 Moon/Nakshatra','R5 Planetary Hour/I Ching','R6 Sephiroth','R7 Flower of Life',
-  'R8 Ticks','R9 Muqatta'at','R10 Tzolkin'
-].map((x,i)=>`<span>${i+1} ${x}</span>`).join('');
+  'R8 Ticks','R9 Muqatta'at','R10 Tzolkin','R11 Ḥurūf','R12 DNA Codon','R13 Meridian'
+].map((x,i)=>`<span>${i} ${x}</span>`).join('');
 
 resize();
 loop();
