@@ -454,7 +454,7 @@ const RINGS=[
     const swR=this.r*Rmax;
     ctx.strokeStyle='#7b9fe0';ctx.lineWidth=2;
     ctx.beginPath();ctx.moveTo(0,0);
-    ctx.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR,Math.sin(R.R8.sweep-90*DEG)*swR);ctx.stroke();
+    ctx.lineTo(Math.cos(R.ticks.sweep-90*DEG)*swR,Math.sin(R.ticks.sweep-90*DEG)*swR);ctx.stroke();
     const mm=RINGS[6].r-0.02;
     ctx.strokeStyle='#b8c4e0';ctx.lineWidth=2.5;
     ctx.beginPath();ctx.moveTo(0,0);
@@ -597,7 +597,7 @@ const RINGS=[
     const swR=this.r*Rmax;
     ctx.strokeStyle='#7b9fe0';ctx.lineWidth=2;
     ctx.beginPath();ctx.moveTo(0,0);
-    ctx.lineTo(Math.cos(R.R8.sweep-90*DEG)*swR,Math.sin(R.R8.sweep-90*DEG)*swR);ctx.stroke();
+    ctx.lineTo(Math.cos(R.ticks.sweep-90*DEG)*swR,Math.sin(R.ticks.sweep-90*DEG)*swR);ctx.stroke();
     const mm=RINGS[6].r-0.02;
     ctx.strokeStyle='#b8c4e0';ctx.lineWidth=2.5;
     ctx.beginPath();ctx.moveTo(0,0);
@@ -764,7 +764,7 @@ function doShare(){
 document.getElementById('help').innerHTML=[
   'R0 UTC','R1 Celtic/Hebrew','R2 Chinese/Islamic','R3 Zodiac/Planets',
   'R4 Moon/Nakshatra','R5 Planetary Hour/I Ching','R6 Sephiroth','R7 Flower of Life',
-  'R8 Ticks','R9 Muqatta'at','R10 Tzolkin','R11 Ḥurūf','R12 DNA Codon','R13 Meridian'
+  'R8 Ticks','R9 Muqatta\'at','R10 Tzolkin','R11 Ḥurūf','R12 DNA Codon','R13 Meridian'
 ].map((x,i)=>`<span>${i} ${x}</span>`).join('');
 
 resize();
